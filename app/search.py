@@ -35,6 +35,50 @@ class SearxngSearch:
         return out
 
 
+class SearchError(RuntimeError):
+    pass
+
+
+class OpenRouterWebSearch:
+    """OpenRouter's web plugin, used as a SEARCH step rather than fused into
+    judging, so the URLs survive and every source is fetched and read by us.
+    Ported from articles-ai `research.OpenRouterWebBackend`.
+    """
+
+    URL = 'https://openrouter.ai/api/v1/chat/completions'
+
+    def __init__(self, api_key: str, model: str, max_results: int = 5,
+                 timeout: float = 30.0, transport: httpx.BaseTransport | None = None):
+        self.api_key, self.model, self.max_results = api_key, model, max_results
+        self.client = httpx.Client(timeout=timeout, transport=transport)
+
+    def search(self, query: str) -> list[dict]:
+        resp = self.client.post(
+            self.URL,
+            headers={'Authorization': f'Bearer {self.api_key}',
+                     'X-Title': 'Claim Check search',
+                     'HTTP-Referer': 'https://github.com/mpgray/claim-check'},
+            json={'model': self.model,
+                  'plugins': [{'id': 'web', 'max_results': self.max_results}],
+                  'max_tokens': 64,
+                  'messages': [{'role': 'user', 'content':
+                                f'Search for: {query}. Reply with the single word OK.'}]})
+        resp.raise_for_status()
+        message = ((resp.json().get('choices') or [{}])[0].get('message') or {})
+        # A 200 with NO annotations key means the plugin did not run (a model
+        # without web support) — an error, not "found nothing". `[]` is fine.
+        if 'annotations' not in message:
+            raise SearchError(f'{self.model} returned no web-search annotations: '
+                              'the plugin did not run. Set CC_SEARCH_MODEL.')
+        out = []
+        for note in message.get('annotations') or []:
+            cite = note.get('url_citation') or {}
+            url = (cite.get('url') or '').strip()
+            if url.startswith(('http://', 'https://')):
+                out.append({'url': url, 'title': (cite.get('title') or '').strip()})
+        return out
+
+
 class NoSearch:
     """No backend configured: judge only against links the article cites."""
 

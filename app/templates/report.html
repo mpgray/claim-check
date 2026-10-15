@@ -9,6 +9,7 @@
 {% else %}
 <h1>{{ r.title or 'Untitled page' }}</h1>
 <p class="src"><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>
+{% if r.search_error %}<p class="error" role="alert">{{ r.search_error }} Claims were checked only against the links the article cites.</p>{% endif %}
 
 <section class="summary" aria-label="Summary">
   {% for v in ['supported', 'contradicted', 'outdated', 'unverified', 'opinion'] %}

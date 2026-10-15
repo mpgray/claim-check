@@ -71,3 +71,13 @@ def test_routes_render(checker):
     assert page.status_code == 200 and b'Receipt' in page.data
     data = client.get('/api/check', query_string={'url': ARTICLE_URL}).get_json()
     assert data['counts']['supported'] == 1
+
+
+def test_search_outage_is_reported_not_silent():
+    class Down:
+        def search(self, q):
+            raise RuntimeError('503')
+    report = Checker(Config(), FakeLLM(), Down(), fetch=fake_fetch).run(ARTICLE_URL)
+    assert 'Search failed' in report.search_error
+    # The cited-link path still works.
+    assert report.counts['supported'] == 1

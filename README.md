@@ -43,25 +43,38 @@ uv run python -m pytest -q
 uv run python -m app            # http://127.0.0.1:8050 — offline FakeLLM
 ```
 
-Real checks — any OpenAI-compatible endpoint (the fleet's LiteLLM works):
+### Demo setup: OpenRouter + Gemma 4
+
+One key is enough. With only `CC_OPENROUTER_API_KEY` set, the chat model
+defaults to **`google/gemma-4-31b-it`** and search uses OpenRouter's web plugin.
 
 ```bash
-export CC_LLM_BASE_URL=https://openrouter.ai/api   # or the LiteLLM URL, no /v1
-export CC_LLM_API_KEY=...
-export CC_LLM_MODEL=...
-export CC_SEARXNG_URL=http://127.0.0.1:8888        # optional; self-hosted only
-export CC_OFFICIAL_DOMAINS=dol.gov,irs.gov,treasury.gov,bls.gov
-export CC_REFERENCE_DOMAINS=wikipedia.org,reuters.com,apnews.com
+cp .env.example .env            # fill in the key, then:
+set -a; . ./.env; set +a
+uv run python -m scripts.check_backend   # probe model + search; run before the demo
+uv run python -m app
 ```
 
-Without `CC_SEARXNG_URL` each claim is judged only against the links the
-article itself cites — still a useful mode ("does the citation say that?").
+- `CC_LLM_MODEL` overrides the model; `google/gemma-4-31b-it-20260402` pins the
+  exact release.
+- `CC_SEARCH_MODEL` pins the search model separately. If the probe says the
+  web plugin "did not run" on Gemma, set this to a model that supports it —
+  the judging still runs on Gemma.
+- If `response_format` is refused by the serving provider, the client drops it
+  after the first 400 and parses JSON from the text.
+- A search failure is shown on the report, never silently turned into a page
+  of "unverified".
+
+Any other OpenAI-compatible endpoint (the fleet's LiteLLM) works with
+`CC_LLM_BASE_URL` / `CC_LLM_API_KEY` / `CC_LLM_MODEL`; a self-hosted SearXNG
+with `CC_SEARXNG_URL`. Without any search backend each claim is judged only
+against the links the article itself cites ("does the citation say that?").
 
 ## Status
 
 Built: fetch with SSRF guard, passage parsing, claim validation and
 "not checked" figures, tiering, the receipt verifier, OpenAI-compatible client
-plus offline fake, synchronous report page and JSON API, tests (23).
+plus offline fake, OpenRouter web-plugin search, Gemma 4 default, backend probe, synchronous report page and JSON API, tests (30).
 
 Known gaps:
 - The SSRF guard resolves then connects separately, so DNS rebinding is not
@@ -75,9 +88,9 @@ Known gaps:
 
 | Time | Work |
 |---|---|
-| 0:00–0:45 | Point at a real model; tune `EXTRACT_SYSTEM` on 3 saved articles until spans validate |
-| 0:45–2:00 | SearXNG (Docker) or an alternative search backend; check source quality per tier |
-| 2:00–3:30 | Judge prompt tuning; measure receipt failure rate and log why each failed |
+| 0:00–0:45 | `scripts.check_backend` green on Gemma 4; tune `EXTRACT_SYSTEM` on 3 saved articles until spans validate |
+| 0:45–2:00 | Check OpenRouter web results per tier; set `CC_OFFICIAL_DOMAINS` for the demo topics |
+| 2:00–3:30 | Judge prompt tuning on Gemma; measure receipt failure rate (verbatim quoting is the hard part for a 31B model) and log why each failed |
 | 3:30–5:00 | Stream results (SSE or a polling job id) so claims colour in as they finish |
 | 5:00–6:00 | "Cited-link audit" view: for each link the article cites, does it say what the article says? |
 | 6:00–7:00 | Bookmarklet (`javascript:location='…/check?url='+encodeURIComponent(location)`), request cache |

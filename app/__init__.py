@@ -13,14 +13,21 @@ from flask import Flask, jsonify, render_template, request
 from app.config import Config
 from app.llm import FakeLLM, OpenAICompatLLM
 from app.pipeline import Checker
-from app.search import NoSearch, SearxngSearch
+from app.search import NoSearch, OpenRouterWebSearch, SearxngSearch
 
 
 def build_checker(cfg: Config) -> Checker:
     llm = (OpenAICompatLLM(cfg.llm_base_url, cfg.llm_api_key, cfg.llm_model)
            if cfg.llm_base_url and cfg.llm_model else FakeLLM())
-    search = SearxngSearch(cfg.searxng_url) if cfg.searxng_url else NoSearch()
-    return Checker(cfg, llm, search)
+    return Checker(cfg, llm, build_search(cfg))
+
+
+def build_search(cfg: Config):
+    if cfg.search == 'searxng' and cfg.searxng_url:
+        return SearxngSearch(cfg.searxng_url)
+    if cfg.search == 'openrouter' and cfg.openrouter_api_key:
+        return OpenRouterWebSearch(cfg.openrouter_api_key, cfg.search_model or cfg.llm_model)
+    return NoSearch()
 
 
 def create_app(checker_factory=None) -> Flask:

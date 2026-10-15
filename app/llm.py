@@ -30,26 +30,46 @@ def _lenient_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
+# Attribution, so OpenRouter's activity log says which app spent the money.
+HEADERS = {'X-Title': 'Claim Check', 'HTTP-Referer': 'https://github.com/mpgray/claim-check'}
+
+
 class OpenAICompatLLM:
-    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 60.0):
+    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 90.0,
+                 transport: httpx.BaseTransport | None = None):
         self.url = base_url.rstrip('/') + '/v1/chat/completions'
         self.api_key = api_key
         self.model = model
-        self.timeout = timeout
+        self.client = httpx.Client(timeout=timeout, transport=transport)
+        # Not every OpenRouter provider honours response_format. Learned once
+        # per process: after a 400 that names it, stop sending it.
+        self.json_mode = True
+
+    def _post(self, system: str, user: str) -> httpx.Response:
+        payload = {'model': self.model, 'temperature': 0, 'max_tokens': 4096,
+                   'messages': [{'role': 'system', 'content': system},
+                                {'role': 'user', 'content': user}]}
+        if self.json_mode:
+            payload['response_format'] = {'type': 'json_object'}
+        return self.client.post(self.url, json=payload,
+                                headers={'Authorization': f'Bearer {self.api_key}', **HEADERS})
 
     def complete_json(self, system: str, user: str) -> dict:
         try:
-            resp = httpx.post(
-                self.url, timeout=self.timeout,
-                headers={'Authorization': f'Bearer {self.api_key}'},
-                json={'model': self.model, 'temperature': 0,
-                      'response_format': {'type': 'json_object'},
-                      'messages': [{'role': 'system', 'content': system},
-                                   {'role': 'user', 'content': user}]})
+            resp = self._post(system, user)
+            if resp.status_code == 400 and self.json_mode:
+                self.json_mode = False
+                resp = self._post(system, user)
             resp.raise_for_status()
-            content = resp.json()['choices'][0]['message']['content']
-        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            message = resp.json()['choices'][0]['message']
+        except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
             raise LLMError(f'Model call failed: {exc}') from exc
+        content = message.get('content') or ''
+        if not content:
+            # Gemma 4 has an optional reasoning mode; a reply that is all
+            # reasoning and no answer is a failure, not an empty verdict.
+            raise LLMError('Model returned no answer text'
+                           + (' (reasoning only).' if message.get('reasoning') else '.'))
         try:
             return _lenient_json(content)
         except (ValueError, LLMError) as exc:

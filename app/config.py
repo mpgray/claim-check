@@ -12,12 +12,46 @@ def _list(name: str) -> list[str]:
     return [d.strip().lower() for d in os.environ.get(name, '').split(',') if d.strip()]
 
 
+OPENROUTER_URL = 'https://openrouter.ai/api'
+# Gemma 4 31B instruct on OpenRouter. The dated slug
+# `google/gemma-4-31b-it-20260402` pins the exact release if the alias moves.
+DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-31b-it'
+
+
+def _openrouter_key() -> str:
+    return os.environ.get('CC_OPENROUTER_API_KEY', '')
+
+
+def _llm_base_url() -> str:
+    return os.environ.get('CC_LLM_BASE_URL') or (OPENROUTER_URL if _openrouter_key() else '')
+
+
+def _llm_model() -> str:
+    return os.environ.get('CC_LLM_MODEL') or (DEFAULT_OPENROUTER_MODEL if _openrouter_key() else '')
+
+
+def _search_backend() -> str:
+    explicit = os.environ.get('CC_SEARCH', '').lower()
+    if explicit:
+        return explicit
+    if os.environ.get('CC_SEARXNG_URL'):
+        return 'searxng'
+    return 'openrouter' if _openrouter_key() else 'none'
+
+
 @dataclass(frozen=True)
 class Config:
-    llm_base_url: str = field(default_factory=lambda: os.environ.get('CC_LLM_BASE_URL', ''))
-    llm_api_key: str = field(default_factory=lambda: os.environ.get('CC_LLM_API_KEY', ''))
-    llm_model: str = field(default_factory=lambda: os.environ.get('CC_LLM_MODEL', ''))
+    llm_base_url: str = field(default_factory=_llm_base_url)
+    llm_api_key: str = field(default_factory=lambda: os.environ.get('CC_LLM_API_KEY') or _openrouter_key())
+    llm_model: str = field(default_factory=_llm_model)
+    # searxng | openrouter | none
+    search: str = field(default_factory=_search_backend)
     searxng_url: str = field(default_factory=lambda: os.environ.get('CC_SEARXNG_URL', ''))
+    openrouter_api_key: str = field(default_factory=_openrouter_key)
+    # Pinned SEPARATELY from the chat model. articles-ai learned this the hard
+    # way: moving the chat model to one without web-plugin support took search
+    # down silently, HTTP 200 and no results. Blank = use the chat model.
+    search_model: str = field(default_factory=lambda: os.environ.get('CC_SEARCH_MODEL', ''))
     # Tiering, as in articles-ai: who writes the rule beats who writes about it.
     official_domains: list[str] = field(default_factory=lambda: _list('CC_OFFICIAL_DOMAINS'))
     reference_domains: list[str] = field(default_factory=lambda: _list('CC_REFERENCE_DOMAINS'))

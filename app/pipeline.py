@@ -29,6 +29,7 @@ class Report:
     missed: list[str]
     cited_links: list[str]
     error: str = ''
+    search_error: str = ''
     counts: dict = field(default_factory=dict)
     tiers: dict = field(default_factory=dict)
 
@@ -58,6 +59,7 @@ class Checker:
     def __init__(self, cfg: Config, llm: LLM, search: Search, fetch=fetch_page):
         self.cfg, self.llm, self.search, self.fetch = cfg, llm, search, fetch
         self._page_cache: dict[str, Page | None] = {}
+        self.search_error = ''
 
     def _page(self, url: str) -> Page | None:
         if url not in self._page_cache:
@@ -86,6 +88,7 @@ class Checker:
                         rejected, claims_mod.missed(body, kept), cited)
         with ThreadPoolExecutor(self.cfg.workers) as pool:
             list(pool.map(lambda c: self._judge(c, cited), kept))
+        report.search_error = self.search_error
         summarize(report)
         return report
 
@@ -94,8 +97,11 @@ class Checker:
         if claim.query:
             try:
                 urls += [r['url'] for r in self.search.search(claim.query)]
-            except Exception:  # a search outage leaves the cited-link path
-                pass
+            except Exception as exc:
+                # A search outage leaves the cited-link path, but never
+                # silently: the report says search was down, or a page of
+                # "unverified" would look like an article nobody can support.
+                self.search_error = f'Search failed: {exc}'[:300]
         # The article's own citations are leads too, but never the only lead
         # when search is available: a citation is what is being checked.
         urls += cited
