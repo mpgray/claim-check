@@ -1,0 +1,100 @@
+"""Claims: what the model says the article asserts, held to the article.
+
+The model proposes; this module disposes. A claim survives only if its `span`
+is a verbatim piece of the article, so a paraphrase can never be judged as if
+the article said it. `missed()` then checks the extractor itself: any number or
+date in the article that no surviving claim covers is reported, which is the
+"report what you drop" rule from game-db applied to extraction.
+"""
+import re
+from dataclasses import dataclass, field
+
+KINDS = ('figure', 'date', 'legal', 'quote', 'causal', 'other', 'opinion')
+
+# Numbers worth checking: money, percentages, plain figures with 2+ digits,
+# years. Single digits and ordinals are mostly prose ("two reasons").
+NUMBER_RE = re.compile(
+    r'(?<![\w.])(?:[$€£]\s?)?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|million|billion|bn|m|k)?(?![\w])',
+    re.I)
+MONTHS = ('january|february|march|april|may|june|july|august|september|october|'
+          'november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec')
+DATE_RE = re.compile(rf'\b(?:{MONTHS})\.?\s+\d{{1,2}}(?:,\s*\d{{4}})?\b|\b\d{{4}}-\d{{2}}-\d{{2}}\b',
+                     re.I)
+
+
+def norm(text: str) -> str:
+    """Whitespace- and case-insensitive, with curly quotes and dashes flattened."""
+    text = str(text or '')
+    text = text.translate(str.maketrans({'‘': "'", '’': "'", '“': '"',
+                                         '”': '"', '–': '-', '—': '-',
+                                         ' ': ' '}))
+    return re.sub(r'\s+', ' ', text).strip().lower()
+
+
+@dataclass
+class Claim:
+    id: int
+    span: str
+    kind: str
+    value: str = ''          # the figure or date the claim turns on, if any
+    query: str = ''          # a search query the extractor suggested
+    verdict: str = 'pending'
+    receipt: dict | None = None
+    reason: str = ''
+    sources: list[dict] = field(default_factory=list)
+
+
+def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:
+    """Keep claims whose span is verbatim article text. Returns (kept, rejected)."""
+    body = norm(article_text)
+    kept, rejected, seen = [], [], set()
+    for item in raw or []:
+        span = str(item.get('span') or '').strip()
+        kind = str(item.get('kind') or 'other').lower()
+        value = str(item.get('value') or '').strip()
+        why = None
+        if len(norm(span)) < 12:
+            why = 'span too short'
+        elif norm(span) not in body:
+            why = 'span is not in the article'
+        elif norm(span) in seen:
+            why = 'duplicate'
+        elif kind not in KINDS:
+            why = f'unknown kind {kind!r}'
+        elif value and norm(value).replace(',', '') not in norm(span).replace(',', ''):
+            why = 'value is not in the span'
+        if why:
+            rejected.append({**item, 'rejected': why})
+            continue
+        seen.add(norm(span))
+        if len(kept) >= limit:
+            rejected.append({**item, 'rejected': 'over the claim limit'})
+            continue
+        kept.append(Claim(id=len(kept) + 1, span=span, kind=kind, value=value,
+                          query=str(item.get('query') or '').strip()))
+    return kept, rejected
+
+
+def checkable_tokens(text: str) -> list[str]:
+    """Figures and dates a fact-checker would want covered."""
+    found = []
+    for m in DATE_RE.finditer(text):
+        found.append(m.group(0))
+    for m in NUMBER_RE.finditer(text):
+        token = m.group(0).strip()
+        digits = re.sub(r'\D', '', token)
+        if len(digits) >= 2 or any(c in token for c in '%$€£'):
+            found.append(token)
+    return found
+
+
+def missed(article_text: str, claims: list[Claim]) -> list[str]:
+    """Figures and dates in the article that no kept claim covers."""
+    covered = ' '.join(norm(c.span) for c in claims)
+    out, seen = [], set()
+    for token in checkable_tokens(article_text):
+        key = norm(token)
+        if key and key not in covered and key not in seen:
+            seen.add(key)
+            out.append(token)
+    return out

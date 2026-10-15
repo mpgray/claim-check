@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block main %}
+<section class="hero">
+  <h1>Check what an article can back up</h1>
+  <p>Paste a link. Each factual claim is checked against sources, and every
+     verdict links to the exact sentence that decided it.</p>
+  <form action="/check" method="get" class="urlform">
+    <label for="url">Article URL</label>
+    <div class="row">
+      <input id="url" name="url" type="url" required placeholder="https://…" autofocus>
+      <button type="submit">Check</button>
+    </div>
+  </form>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if fake %}<p class="note">Running without a model: the offline checker
+     matches figures literally. Set <code>CC_LLM_BASE_URL</code> and
+     <code>CC_LLM_MODEL</code> for real checks.</p>{% endif %}
+</section>
+{% endblock %}
