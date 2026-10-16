@@ -11,11 +11,14 @@ from dataclasses import dataclass, field
 
 KINDS = ('figure', 'date', 'legal', 'quote', 'causal', 'other', 'opinion')
 
-# Numbers worth checking: money, percentages, plain figures with 2+ digits,
-# years. Single digits and ordinals are mostly prose ("two reasons").
+# Numbers worth checking: money, percentages, figures with a unit, decimals,
+# grouped thousands and years. A bare one- or two-digit integer is mostly prose
+# ("13 tips", "10 states") or a list index, and `[9]` is a footnote marker.
 NUMBER_RE = re.compile(
-    r'(?<![\w.])(?:[$€£]\s?)?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|million|billion|bn|m|k)?(?![\w])',
+    r'(?<![\w.\[])(?:[$€£]\s?)?\d(?:[\d,]*\d)?(?:\.\d+)?'
+    r'(?:\s?(?:%|percent|million|billion|trillion|bn|m|k)(?![\w]))?(?![\w\]])',
     re.I)
+_MARKED = re.compile(r'[$€£%,.]|percent|illion|bn|\d\s?[mk]$', re.I)
 MONTHS = ('january|february|march|april|may|june|july|august|september|october|'
           'november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec')
 DATE_RE = re.compile(rf'\b(?:{MONTHS})\.?\s+\d{{1,2}}(?:,\s*\d{{4}})?\b|\b\d{{4}}-\d{{2}}-\d{{2}}\b',
@@ -42,6 +45,8 @@ class Claim:
     receipt: dict | None = None
     reason: str = ''
     sources: list[dict] = field(default_factory=list)
+    dropped_self: int = 0    # search results that were the article's own site
+    snapshot: dict | None = None
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:
@@ -83,7 +88,7 @@ def checkable_tokens(text: str) -> list[str]:
     for m in NUMBER_RE.finditer(text):
         token = m.group(0).strip()
         digits = re.sub(r'\D', '', token)
-        if len(digits) >= 2 or any(c in token for c in '%$€£'):
+        if _MARKED.search(token) or len(digits) >= 3:
             found.append(token)
     return found
 

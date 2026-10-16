@@ -43,3 +43,11 @@ def test_missed_lists_figures_no_claim_covers():
     left = missed(ARTICLE, kept)
     assert any('2009' in m for m in left)
     assert not any('7.25' in m for m in left)
+
+
+def test_missed_ignores_footnotes_list_numbers_and_trailing_commas():
+    from app.claims import checkable_tokens
+    found = checkable_tokens('In 1938, it covered 13 trades [9] and 10 million workers at 90%.')
+    assert '1938' in found and '1938,' not in found
+    assert '13' not in found and '9' not in found
+    assert '10 million' in found and '90%' in found

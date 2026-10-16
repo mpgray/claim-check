@@ -53,3 +53,40 @@ def test_text_fragment_escapes_reserved_characters():
 def test_long_quote_uses_start_end_form():
     q = ' '.join(f'w{i}' for i in range(20))
     assert text_fragment_url('https://a.example/', q).endswith('#:~:text=w0%20w1%20w2%20w3%20w4,w15%20w16%20w17%20w18%20w19')
+
+
+SEATTLE = 'https://seattle.example/bulletin'
+SEATTLE_TEXT = 'The 2024 minimum wage for large employers (501 or more employees) is $19.97/hour.'
+SEATTLE_CLAIM = Claim(id=2, span="Seattle's minimum wage rose to $21.30 an hour", kind='figure', value='$21.30')
+
+
+def test_older_source_cannot_contradict_a_current_figure():
+    """A 2024 bulletin does not show a 2026 article's figure is wrong; it is just older."""
+    verdict, receipt, reason = check(
+        SEATTLE_CLAIM, {'verdict': 'contradicted', 'url': SEATTLE, 'quote': SEATTLE_TEXT},
+        {SEATTLE: SEATTLE_TEXT}, article_date='2026-01-01')
+    assert verdict == 'unverified' and receipt is None and 'predates' in reason
+
+
+def test_older_page_date_counts_when_the_quote_has_no_year():
+    text = 'The minimum wage for large employers is $19.97 per hour.'
+    verdict, _, reason = check(
+        SEATTLE_CLAIM, {'verdict': 'contradicted', 'url': SEATTLE, 'quote': text},
+        {SEATTLE: text}, article_date='2026-01-01', source_dates={SEATTLE: '2024-06-01'})
+    assert verdict == 'unverified' and 'source (2024-06-01)' in reason
+
+
+def test_current_source_can_still_contradict():
+    text = 'The 2026 minimum wage for large employers is $21.00 per hour.'
+    verdict, receipt, _ = check(
+        SEATTLE_CLAIM, {'verdict': 'contradicted', 'url': SEATTLE, 'quote': text},
+        {SEATTLE: text}, article_date='2026-01-01')
+    assert verdict == 'contradicted' and receipt
+
+
+def test_claim_with_its_own_year_is_judged_by_that_year():
+    claim = Claim(id=3, span='In 2009, Congress increased it to $8.25 per hour.', kind='figure', value='$8.25')
+    text = 'On July 24, 2009 the federal minimum wage rose to $7.25 per hour.'
+    verdict, _, _ = check(claim, {'verdict': 'contradicted', 'url': SEATTLE, 'quote': text},
+                          {SEATTLE: text}, article_date='2026-01-01')
+    assert verdict == 'contradicted'

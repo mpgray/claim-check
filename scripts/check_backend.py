@@ -21,9 +21,12 @@ def main() -> int:
     ok = True
     t = time.monotonic()
     try:
-        out = checker.llm.complete_json(
-            'Return JSON {"ok": true, "model": "<your name>"} and nothing else.', 'ping')
-        print(f'model  OK   {cfg.llm_model}  {time.monotonic() - t:.1f}s  {out}')
+        # Only the configured slug is reported: a model asked its own name
+        # answers whatever its training data suggests (Gemma said "gpt-4o").
+        out = checker.llm.complete_json('Return JSON {"ok": true} and nothing else.', 'ping')
+        if out.get('ok') is not True:
+            raise ValueError(f'unexpected reply {out!r}')
+        print(f'model  OK   {cfg.llm_model}  {time.monotonic() - t:.1f}s  (JSON reply parsed)')
     except Exception as exc:
         ok = False
         print(f'model  FAIL {cfg.llm_model}: {exc}')

@@ -10,12 +10,14 @@ Return JSON: {"claims": [{"span": ..., "kind": ..., "value": ..., "query": ...}]
   Use opinion for judgement, advice or prediction; those are not checked.
 - value: the exact number or date the claim turns on, copied from the span,
   or "" if none.
-- query: a web search query that would find a primary source for it.
+- query: a web search query that would find a primary source for it. When
+  the claim is about a current or time-bound figure, include the year it
+  applies to (the article's date is given; use it when the claim gives none).
 
 Prefer specific, checkable claims (figures, dates, legal requirements,
 attributed quotes) over general statements. At most {limit} claims."""
 
-EXTRACT_USER = "ARTICLE:\n{article}"
+EXTRACT_USER = "ARTICLE DATE: {article_date}\nARTICLE:\n{article}"
 
 JUDGE_SYSTEM = """JUDGE one claim against the source passages provided.
 
@@ -32,6 +34,12 @@ Return JSON: {"verdict": ..., "url": ..., "quote": ..., "as_of": ..., "reason": 
 - as_of: for outdated, the ISO date (YYYY-MM-DD) it changed; else "".
 - reason: one plain sentence for a reader.
 
+Dates: the article's date and each source's date (when known) are given. A
+source written BEFORE the article cannot show that the article's current
+figure is wrong; at most it shows an older figure. Answer unverified then,
+not contradicted. A deciding quote that names its own year is judged by that
+year.
+
 Use only the passages below, never memory."""
 
-JUDGE_USER = "CLAIM:\n{claim}\nSOURCES:\n{sources}"
+JUDGE_USER = "ARTICLE DATE: {article_date}\nCLAIM:\n{claim}\nSOURCES:\n{sources}"

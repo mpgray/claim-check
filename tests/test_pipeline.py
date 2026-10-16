@@ -73,6 +73,39 @@ def test_routes_render(checker):
     assert data['counts']['supported'] == 1
 
 
+def test_the_article_is_never_its_own_receipt():
+    """Search often returns the article (or its publisher's mirror) for its own sentences."""
+    class SelfSearch:
+        def search(self, q):
+            return [{'url': 'https://www.blog.example/wage'}, {'url': SOURCE_URL}]
+
+    def fetch(url):
+        if url == 'https://www.blog.example/wage':
+            return fake_fetch(ARTICLE_URL)
+        return fake_fetch(url)
+    report = Checker(Config(), FakeLLM(), SelfSearch(), fetch=fetch).run(ARTICLE_URL)
+    for c in report.claims:
+        assert all('blog.example' not in s['url'] for s in c.sources)
+        assert not c.receipt or 'blog.example' not in c.receipt['url']
+    assert all(c.dropped_self == 1 for c in report.claims if c.kind != 'opinion')
+
+
+def test_long_article_is_chunked_and_the_unread_part_is_counted():
+    from app.pipeline import chunk_passages
+    passages = ['word ' * 2000] * 30           # ~300k chars
+    chunks, unread = chunk_passages(passages, size=30_000, cap=200_000)
+    assert len(chunks) > 1 and all(sum(len(p) for p in c) <= 30_000 for c in chunks)
+    assert unread > 90_000
+
+
+def test_events_report_each_claim():
+    seen = []
+    report = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch).run(
+        ARTICLE_URL, on_event=lambda kind, r, data: seen.append(kind))
+    assert seen[0] == 'fetched' and seen[1] == 'claims' and seen[-1] == 'done'
+    assert seen.count('claim') == len(report.claims) and report.status == 'done'
+
+
 def test_search_outage_is_reported_not_silent():
     class Down:
         def search(self, q):

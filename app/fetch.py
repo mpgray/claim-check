@@ -16,6 +16,8 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from app.dates import page_date
+
 MAX_BYTES = 3_000_000
 MAX_REDIRECTS = 5
 TIMEOUT = 12.0
@@ -33,6 +35,8 @@ class Page:
     title: str
     passages: list[str]
     links: list[str] = field(default_factory=list)
+    date: str = ''           # declared in the page's markup (app.dates), or ''
+    kind: str = 'html'       # html | text | pdf
 
     @property
     def text(self) -> str:
@@ -143,14 +147,16 @@ def fetch_page(url: str, *, client: httpx.Client | None = None) -> Page:
                         raise FetchError('Page is too large to check.')
                 text = body.decode(resp.encoding or 'utf-8', errors='replace')
                 if ctype == 'text/plain':
-                    title, links = '', []
+                    title, links, when, kind = '', [], '', 'text'
                     passages = [' '.join(p.split()) for p in re.split(r'\n\s*\n', text)]
                 else:
                     title, passages, links = parse_html(text)
+                    when, kind = page_date(text), 'html'
                 passages = [p for p in passages if p]
                 if not passages:
                     raise FetchError('Page has no readable text.')
-                return Page(url=str(resp.url), title=title, passages=passages, links=links)
+                return Page(url=str(resp.url), title=title, passages=passages, links=links,
+                            date=when, kind=kind)
         raise FetchError('Too many redirects.')
     except httpx.HTTPError as exc:
         raise FetchError(f'Could not fetch the page ({exc.__class__.__name__}).') from exc
