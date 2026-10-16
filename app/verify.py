@@ -1,8 +1,7 @@
 """The receipt check: a model's verdict, held to the page it cites.
 
-Ported in spirit from articles-ai `supersession._verify`, where the model "may
-only QUOTE" and code holds the quote to the fetched page. Here that rule is the
-whole product. A verdict that fails any check is not softened or retried — it
+The model may only QUOTE; code holds the quote to the fetched page. That rule
+is the whole product. A verdict that fails any check is not softened or retried — it
 becomes `unverified`, with the failed check as its reason.
 """
 import re

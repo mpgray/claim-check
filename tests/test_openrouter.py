@@ -58,7 +58,7 @@ def test_web_search_reads_annotations():
 
 
 def test_missing_annotations_means_the_plugin_did_not_run():
-    """HTTP 200 with no annotations key took articles-ai's search down silently."""
+    """HTTP 200 with no annotations key is a search that silently did not run."""
     s = OpenRouterWebSearch('k', 'm', transport=httpx.MockTransport(
         lambda r: httpx.Response(200, json=_chat('OK'))))
     with pytest.raises(SearchError):

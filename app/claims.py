@@ -3,8 +3,8 @@
 The model proposes; this module disposes. A claim survives only if its `span`
 is a verbatim piece of the article, so a paraphrase can never be judged as if
 the article said it. `missed()` then checks the extractor itself: any number or
-date in the article that no surviving claim covers is reported, which is the
-"report what you drop" rule from game-db applied to extraction.
+date in the article that no surviving claim covers is reported: what the
+extractor drops is shown, not hidden.
 """
 import re
 from dataclasses import dataclass, field

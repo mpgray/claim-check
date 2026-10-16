@@ -2,6 +2,8 @@
 name = "claim-check"
 version = "0.1.0"
 description = "Paste an article; every factual claim gets a verdict with a receipt."
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0",

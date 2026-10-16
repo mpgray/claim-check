@@ -1,6 +1,6 @@
 """Search backends and source tiers.
 
-Tiering is articles-ai's and game-db's idea: every source records whether it is
+Every source records whether it is
 `official` (writes the rule, publishes the figure), `reference` (a curated
 secondary source) or `open` (anything else). It is measurement, not advice —
 the tier is decided by the host that answered, never by the model.
@@ -18,7 +18,7 @@ class Search(Protocol):
 
 class SearxngSearch:
     """A self-hosted SearXNG with `json` in `search.formats`. Public instances
-    429 server-side searches (learned the hard way in articles-ai)."""
+    usually return HTTP 429 to server-side searches."""
 
     def __init__(self, base_url: str, timeout: float = 10.0):
         self.base_url = base_url.rstrip('/')
@@ -43,7 +43,6 @@ class SearchError(RuntimeError):
 class OpenRouterWebSearch:
     """OpenRouter's web plugin, used as a SEARCH step rather than fused into
     judging, so the URLs survive and every source is fetched and read by us.
-    Ported from articles-ai `research.OpenRouterWebBackend`.
     """
 
     URL = 'https://openrouter.ai/api/v1/chat/completions'

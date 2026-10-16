@@ -1,7 +1,7 @@
 """Model access: one OpenAI-compatible chat endpoint (LiteLLM or OpenRouter).
 
-The same wire shape articles-ai's `OpenAICompatClient` speaks, so the fleet's
-LiteLLM proxy works as-is. `FakeLLM` answers from fixtures so the UI and tests
+Any OpenAI-compatible chat API works (OpenRouter, a LiteLLM proxy, a local
+server). `FakeLLM` answers from fixtures so the UI and tests
 run with no key and no network.
 """
 import json

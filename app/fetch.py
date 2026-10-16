@@ -1,9 +1,7 @@
 """Fetch a page and turn it into passages.
 
-Ported from articles-ai `app/ai/research.py` (`_EvidenceHTMLParser`,
-`_evidence_passages`, `_focused_excerpt`). The fetch itself is new and smaller
-than articles-ai's pinned transport, but keeps the part that matters for a
-public URL box: every hop is resolved and refused if it lands on a private,
+Passages, then focused excerpts for the model. The fetch keeps the part that
+matters for a public URL box: every hop is resolved and refused if it lands on a private,
 loopback or link-local address. A "paste any URL" form without that is an
 SSRF endpoint.
 """

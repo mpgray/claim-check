@@ -48,11 +48,11 @@ class Config:
     search: str = field(default_factory=_search_backend)
     searxng_url: str = field(default_factory=lambda: os.environ.get('CC_SEARXNG_URL', ''))
     openrouter_api_key: str = field(default_factory=_openrouter_key)
-    # Pinned SEPARATELY from the chat model. articles-ai learned this the hard
-    # way: moving the chat model to one without web-plugin support took search
-    # down silently, HTTP 200 and no results. Blank = use the chat model.
+    # Pinned SEPARATELY from the chat model: moving the chat model to one
+    # without web-plugin support takes search down silently, HTTP 200 and no
+    # results. Blank = use the chat model.
     search_model: str = field(default_factory=lambda: os.environ.get('CC_SEARCH_MODEL', ''))
-    # Tiering, as in articles-ai: who writes the rule beats who writes about it.
+    # Tiering: who writes the rule beats who writes about it.
     official_domains: list[str] = field(default_factory=lambda: _list('CC_OFFICIAL_DOMAINS'))
     reference_domains: list[str] = field(default_factory=lambda: _list('CC_REFERENCE_DOMAINS'))
     # Built-in tier lists (app.search) on top of the two above; CC_DEFAULT_TIERS=0 for only yours.
