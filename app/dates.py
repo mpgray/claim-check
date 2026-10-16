@@ -38,36 +38,34 @@ def _attrs(tag: str) -> dict:
     return out
 
 
-def _ld_dates(node, found: dict) -> None:
+def _ld_main(node):
+    """The first JSON-LD node that carries a date: the page's own entity.
+    Later nodes are often "related stories" with their own, newer dates."""
     if isinstance(node, list):
         for item in node:
-            _ld_dates(item, found)
+            found = _ld_main(item)
+            if found:
+                return found
     elif isinstance(node, dict):
-        for key in ('dateModified', 'datePublished'):
-            if key in node and key not in found:
-                d = iso_date(node[key])
-                if d:
-                    found[key] = d
-        for value in node.values():
-            if isinstance(value, (dict, list)):
-                _ld_dates(value, found)
+        if 'datePublished' in node or 'dateModified' in node:
+            return node
+        for key in ('@graph', 'mainEntity', 'mainEntityOfPage'):
+            if key in node:
+                found = _ld_main(node[key])
+                if found:
+                    return found
+    return None
 
 
 def page_date(html: str) -> str:
-    """The page's most recent declared date (modified over published), ISO or ''.
+    """The page's own declared date, ISO, or ''.
 
-    Modified wins because the question it answers is "how current is this
-    page's figure", and a page updated last week is current as of last week.
+    Page-level metadata in priority order, first hit wins; never a max over
+    everything, because listing pages and rails embed other articles' dates.
+    Modified beats published: the question is how current the page's figure
+    is, and a page updated last week is current as of last week.
     """
-    head = html[:400_000]
-    candidates: list[str] = []
-    for m in _LDJSON_RE.finditer(head):
-        try:
-            found: dict = {}
-            _ld_dates(json.loads(m[1].strip()), found)
-            candidates += [found[k] for k in ('dateModified', 'datePublished') if k in found]
-        except (ValueError, TypeError):
-            continue
+    head = html[:2_000_000]
     metas: dict[str, str] = {}
     for m in _META_RE.finditer(head):
         a = _attrs(m[0])
@@ -76,10 +74,17 @@ def page_date(html: str) -> str:
             d = iso_date(a.get('content', ''))
             if d:
                 metas[key] = d
-    candidates += [metas[k] for k in _META_KEYS if k in metas]
-    if not candidates:
-        m = _TIME_RE.search(head)
-        if m:
-            candidates.append(iso_date(m[1]))
-    candidates = [c for c in candidates if c]
-    return max(candidates) if candidates else ''
+    for key in _META_KEYS:
+        if key in metas:
+            return metas[key]
+    for m in _LDJSON_RE.finditer(head):
+        try:
+            node = _ld_main(json.loads(m[1].strip()))
+        except (ValueError, TypeError):
+            continue
+        if node:
+            d = iso_date(node.get('dateModified') or '') or iso_date(node.get('datePublished') or '')
+            if d:
+                return d
+    m = _TIME_RE.search(head)
+    return iso_date(m[1]) if m else ''

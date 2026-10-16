@@ -107,6 +107,7 @@ class Checker:
         self.snapshotter = snapshotter
         self._page_cache: dict[str, Page | None] = {}
         self._cache_lock = threading.Lock()
+        self._link_context: list[tuple[str, str]] = []
         self.search_error = ''
 
     def _page(self, url: str) -> Page | None:
@@ -144,6 +145,8 @@ class Checker:
         body = '\n\n'.join(read)
         report.url, report.title, report.passages, report.date = page.url, page.title, read, page.date
         report.cited_links = _cited_links(page.links, page.url)
+        self._link_context = [(urljoin(page.url, h).split('#', 1)[0], ctx)
+                              for h, ctx in page.link_context]
         emit('fetched', report, {'title': page.title})
 
         raw = self._extract(chunks, report)
@@ -209,9 +212,18 @@ class Checker:
             out += [r[i] for r in results if i < len(r) and isinstance(r[i], dict)]
         return out
 
+    def _own_citations(self, claim: claims_mod.Claim, cited: list[str]) -> list[str]:
+        """Links in the very passage the claim sits in: does the citation say that?"""
+        span = claims_mod.norm(claim.span)
+        return [u for u, ctx in self._link_context
+                if u in cited and span and span[:120] in claims_mod.norm(ctx)]
+
     def _candidate_urls(self, claim: claims_mod.Claim, cited: list[str],
                         article_url: str) -> list[str]:
-        urls: list[str] = []
+        own_cites = self._own_citations(claim, cited)
+        # The claim's own citation is read first; search leads come next, so
+        # the citation is checked rather than trusted.
+        urls: list[str] = own_cites[:1]
         if claim.query:
             try:
                 urls += [r['url'] for r in self.search.search(claim.query)]
@@ -222,7 +234,7 @@ class Checker:
                 self.search_error = f'Search failed: {exc}'[:300]
         # The article's own citations are leads too, but never the only lead
         # when search is available: a citation is what is being checked.
-        urls += cited
+        urls += own_cites[1:] + cited
         own = site(article_url)
         seen, out = set(), []
         for u in urls:
@@ -254,7 +266,7 @@ class Checker:
             dates[page.url] = page.date
             sources.append({'url': page.url, 'title': page.title, 'date': page.date,
                             'kind': page.kind,
-                            'text': focused_excerpt(page.passages, claim.span),
+                            'text': focused_excerpt(page.source_passages, claim.span),
                             'tier': tier(page.url, self.cfg.official_domains,
                                          self.cfg.reference_domains)})
         claim.sources = [{k: s[k] for k in ('url', 'title', 'tier', 'date', 'kind')} for s in sources]

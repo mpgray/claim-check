@@ -19,3 +19,9 @@ def test_time_tag_is_the_fallback_and_nothing_is_empty():
 
 def test_invalid_dates_are_dropped():
     assert iso_date('2024-13-40') == ''
+
+
+def test_related_story_dates_do_not_win():
+    html = ('<script type="application/ld+json">[{"@type":"NewsArticle","datePublished":"2026-01-01"},'
+            '{"@type":"ItemList","itemListElement":[{"datePublished":"2026-10-12"}]}]</script>')
+    assert page_date(html) == '2026-01-01'

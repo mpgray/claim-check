@@ -33,27 +33,36 @@ class FetchError(ValueError):
 class Page:
     url: str
     title: str
-    passages: list[str]
+    passages: list[str]          # readable body (the article, not its chrome)
     links: list[str] = field(default_factory=list)
-    date: str = ''           # declared in the page's markup (app.dates), or ''
-    kind: str = 'html'       # html | text | pdf
+    date: str = ''               # declared in the page's markup (app.dates), or ''
+    kind: str = 'html'           # html | text | pdf
+    all_passages: list[str] = field(default_factory=list)   # every visible block
+    link_context: list[tuple[str, str]] = field(default_factory=list)  # (href, its passage)
 
     @property
     def text(self) -> str:
-        return '\n\n'.join(self.passages)
+        """What a receipt quote is held to: every visible block, not only the
+        readable body, so a figure in a table or sidebar still counts."""
+        return '\n\n'.join(self.all_passages or self.passages)
+
+    @property
+    def source_passages(self) -> list[str]:
+        return self.all_passages or self.passages
 
 
 class _PassageParser(HTMLParser):
     _BLOCKS = {'article', 'blockquote', 'br', 'dd', 'div', 'dt', 'h1', 'h2', 'h3',
                'h4', 'h5', 'h6', 'li', 'main', 'p', 'section', 'td', 'th', 'tr'}
     _SKIP = {'aside', 'footer', 'header', 'nav', 'noscript', 'script', 'style', 'svg',
-             'form', 'button'}
+             'form', 'button', 'template'}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.passages: list[str] = []
         self.title = ''
-        self.links: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self._pending: list[str] = []
         self._parts: list[str] = []
         self._title_parts: list[str] = []
         self._in_title = False
@@ -63,7 +72,10 @@ class _PassageParser(HTMLParser):
         passage = ' '.join(''.join(self._parts).split())
         if passage:
             self.passages.append(passage)
-        self._parts = []
+        # A link belongs to the passage it sits in; that is how a citation is
+        # tied to the sentence it supports, and how chrome links are told apart.
+        self.links += [(href, passage) for href in self._pending]
+        self._pending, self._parts = [], []
 
     def handle_starttag(self, tag, attrs):
         if tag == 'title':
@@ -76,7 +88,7 @@ class _PassageParser(HTMLParser):
         if tag == 'a' and not self._skip_depth:
             href = dict(attrs).get('href')
             if href:
-                self.links.append(href)
+                self._pending.append(href)
 
     def handle_endtag(self, tag):
         if tag == 'title':
@@ -94,12 +106,90 @@ class _PassageParser(HTMLParser):
             self._parts.append(data)
 
 
-def parse_html(html: str) -> tuple[str, list[str], list[str]]:
-    """(title, passages, hrefs) — hrefs only from outside page chrome."""
+MIN_READABLE_CHARS = 200
+
+
+def _norm(text: str) -> str:
+    return ' '.join(str(text).split()).lower()
+
+
+def readable_passages(html: str) -> list[str]:
+    """The article body by trafilatura's readability rules, or [] if it found
+    too little to trust (then the caller falls back to every block)."""
+    try:
+        import trafilatura
+        text = trafilatura.extract(html, include_tables=True, include_comments=False,
+                                   include_links=False, favor_recall=True,
+                                   output_format='txt') or ''
+    except Exception:
+        return []
+    passages = [' '.join(line.split()) for line in text.splitlines()]
+    passages = [p for p in passages if p]
+    return passages if sum(len(p) for p in passages) >= MIN_READABLE_CHARS else []
+
+
+@dataclass
+class Parsed:
+    title: str
+    passages: list[str]
+    all_passages: list[str]
+    links: list[str]                       # hrefs inside the readable body
+    link_context: list[tuple[str, str]]
+
+
+def parse_document(html: str) -> Parsed:
     parser = _PassageParser()
     parser.feed(html)
     parser._flush()
-    return parser.title, [p for p in parser.passages if p], parser.links
+    every = [p for p in parser.passages if p]
+    readable = readable_passages(html) or every
+    body = _norm(' '.join(readable))
+    # Keep a link only if the passage it sits in is part of the readable body:
+    # this is what drops "related stories" rails and footer link farms.
+    context = [(href, passage) for href, passage in parser.links
+               if passage and _norm(passage)[:160] in body]
+    return Parsed(parser.title, readable, every, [h for h, _ in context], context)
+
+
+def parse_html(html: str) -> tuple[str, list[str], list[str]]:
+    """(title, readable passages, hrefs in the readable body)."""
+    doc = parse_document(html)
+    return doc.title, doc.passages, doc.links
+
+
+MAX_PDF_BYTES = 12_000_000
+MAX_PDF_PAGES = 80
+
+
+def parse_pdf(data: bytes, url: str) -> tuple[str, list[str]]:
+    """(title, passages) from a PDF's text layer. A scanned PDF has none: that
+    is an error to show, not a page of nothing."""
+    import io
+
+    from pypdf import PdfReader
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        title = str((reader.metadata or {}).get('/Title') or '').strip()
+        passages: list[str] = []
+        for page in reader.pages[:MAX_PDF_PAGES]:
+            text = page.extract_text() or ''
+            text = re.sub(r'(\w)-\n(\w)', r'\1\2', text)      # re-join hyphenated words
+            for block in re.split(r'\n\s*\n', text):
+                lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+                # Group lines into paragraph-sized passages so ranking works.
+                buf = ''
+                for line in lines:
+                    buf = f'{buf} {line}'.strip()
+                    if len(buf) >= 500 and buf.endswith(('.', ':', ';')):
+                        passages.append(buf)
+                        buf = ''
+                if buf:
+                    passages.append(buf)
+    except Exception as exc:
+        raise FetchError(f'Could not read the PDF ({exc.__class__.__name__}).') from exc
+    if not title:
+        title = urlsplit(url).path.rsplit('/', 1)[-1] or url
+    return title, passages
 
 
 def article_passages(passages: list[str], min_words: int = 8) -> list[str]:
@@ -138,25 +228,36 @@ def fetch_page(url: str, *, client: httpx.Client | None = None) -> Page:
                 if resp.status_code != 200:
                     raise FetchError(f'{parts.hostname} answered HTTP {resp.status_code}.')
                 ctype = resp.headers.get('content-type', '').split(';')[0].strip().lower()
-                if ctype not in ('text/html', 'application/xhtml+xml', 'text/plain'):
+                is_pdf = ctype == 'application/pdf' or (
+                    ctype in ('application/octet-stream', 'binary/octet-stream')
+                    and parts.path.lower().endswith('.pdf'))
+                if not is_pdf and ctype not in ('text/html', 'application/xhtml+xml', 'text/plain'):
                     raise FetchError(f'Unsupported content type: {ctype or "unknown"}.')
+                limit = MAX_PDF_BYTES if is_pdf else MAX_BYTES
                 body = b''
                 for chunk in resp.iter_bytes():
                     body += chunk
-                    if len(body) > MAX_BYTES:
+                    if len(body) > limit:
                         raise FetchError('Page is too large to check.')
-                text = body.decode(resp.encoding or 'utf-8', errors='replace')
-                if ctype == 'text/plain':
-                    title, links, when, kind = '', [], '', 'text'
-                    passages = [' '.join(p.split()) for p in re.split(r'\n\s*\n', text)]
+                page = Page(url=str(resp.url), title='', passages=[])
+                if is_pdf:
+                    page.title, page.passages = parse_pdf(body, page.url)
+                    page.kind = 'pdf'
                 else:
-                    title, passages, links = parse_html(text)
-                    when, kind = page_date(text), 'html'
-                passages = [p for p in passages if p]
-                if not passages:
-                    raise FetchError('Page has no readable text.')
-                return Page(url=str(resp.url), title=title, passages=passages, links=links,
-                            date=when, kind=kind)
+                    text = body.decode(resp.encoding or 'utf-8', errors='replace')
+                    if ctype == 'text/plain':
+                        page.passages = [' '.join(p.split()) for p in re.split(r'\n\s*\n', text)]
+                        page.kind = 'text'
+                    else:
+                        doc = parse_document(text)
+                        page.title, page.passages, page.all_passages = doc.title, doc.passages, doc.all_passages
+                        page.links, page.link_context = doc.links, doc.link_context
+                        page.date = page_date(text)
+                page.passages = [p for p in page.passages if p]
+                if not page.passages:
+                    raise FetchError('Page has no readable text'
+                                     + (' (a scanned PDF?).' if is_pdf else '.'))
+                return page
         raise FetchError('Too many redirects.')
     except httpx.HTTPError as exc:
         raise FetchError(f'Could not fetch the page ({exc.__class__.__name__}).') from exc
