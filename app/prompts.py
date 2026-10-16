@@ -40,6 +40,11 @@ figure is wrong; at most it shows an older figure. Answer unverified then,
 not contradicted. A deciding quote that names its own year is judged by that
 year.
 
+Inflation: an inflation-adjusted equivalent in the claim ("equivalent to $X
+in YEAR") is computed separately by code from official CPI data. Judge the
+rest of the claim; do not answer unverified only because no source restates
+the adjusted figure.
+
 Use only the passages below, never memory."""
 
 JUDGE_USER = "ARTICLE DATE: {article_date}\nCLAIM:\n{claim}\nSOURCES:\n{sources}"

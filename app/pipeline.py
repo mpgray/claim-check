@@ -6,15 +6,17 @@ Every model output passes through code before it counts: spans through
 `Checker.run` reports progress through `on_event(kind, report, data)` so a
 background job can persist and stream the report as claims finish.
 """
+import dataclasses
 import json
 import math
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
 from app import claims as claims_mod
-from app import verify
+from app import inflation, verify
 from app.config import Config
 from app.fetch import FetchError, Page, article_passages, fetch_page, focused_excerpt
 from app.llm import LLM, LLMError
@@ -102,11 +104,35 @@ def _noop(kind, report, data):
     pass
 
 
+def merge_inflation(check: dict, verdict: str, reason: str, receipt: dict | None):
+    """Fold a computed inflation check into the judge's verdict.
+
+    A conversion that is wrong (explicit base year, more than 10% off) makes
+    the claim contradicted, with the computation as its receipt. A correct one
+    never upgrades the claim by itself: the facts around it still need a
+    source. An unsure one only adds its explanation.
+    """
+    status = check.get('status')
+    if status == 'wrong':
+        if verdict == 'contradicted' and receipt:
+            return verdict, f"{reason} The inflation conversion is also wrong: {check['detail']}", receipt
+        computed = {'url': check['url'], 'link': check['url'], 'quote': check['detail'],
+                    'tier': 'official', 'kind': 'computed', 'as_of': '', 'date': ''}
+        return 'contradicted', f"The inflation conversion is wrong: {check['detail']}", computed
+    if status == 'ok':
+        if verdict == 'supported':
+            return verdict, f'{reason} The inflation conversion checks out against BLS CPI data.', receipt
+        return verdict, (f'{reason} The inflation conversion checks out against BLS CPI data; '
+                         'the other facts were not confirmed by a source.').strip(), receipt
+    return verdict, f"{reason} Inflation: {check.get('detail', '')}".strip(), receipt
+
+
 class Checker:
     def __init__(self, cfg: Config, llm: LLM, search: Search, fetch=fetch_page,
                  snapshotter=None):
         self.cfg, self.llm, self.search, self.fetch = cfg, llm, search, fetch
         self.snapshotter = snapshotter
+        self.cpi_loader = lambda: inflation.load_cpi(cfg.data_dir)
         self._page_cache: dict[str, Page | None] = {}
         self._cache_lock = threading.Lock()
         # Held while a claim's result is written and while an event handler
@@ -262,12 +288,38 @@ class Checker:
         return out
 
     def _judge(self, claim: claims_mod.Claim, report: Report) -> None:
-        verdict, reason, receipt, sources = self._decide(claim, report)
+        check, value = self._inflation(claim, report)
+        verdict, reason, receipt, sources = self._decide(claim, report, value)
+        if check:
+            verdict, reason, receipt = merge_inflation(check, verdict, reason, receipt)
         with self.lock:
             claim.sources, claim.receipt = sources, receipt
             claim.verdict, claim.reason = verdict, reason
+            claim.checks = [check] if check else []
 
-    def _decide(self, claim: claims_mod.Claim, report: Report):
+    def _inflation(self, claim: claims_mod.Claim, report: Report) -> tuple[dict | None, str | None]:
+        """(computed check, value to judge instead) for a claim with an
+        inflation conversion in it; (None, None) otherwise."""
+        if claim.kind == 'opinion':
+            return None, None
+        conv = inflation.find(claim.span)
+        if not conv:
+            return None, None
+        inflation.infer_base_year(conv, claim.span, report.passages)
+        try:
+            check = inflation.check(conv, self.cpi_loader())
+        except Exception as exc:
+            check = {'kind': 'inflation', 'status': 'unsure', 'url': inflation.SOURCE_URL,
+                     'detail': f'The inflation conversion could not be computed: {exc}'[:300]}
+        # The judge cannot find a source restating the adjusted figure, so the
+        # figure it is held to becomes the original amount.
+        value = None
+        digits = lambda t: claims_mod.norm(t).replace(',', '')
+        if claim.value and digits(claim.value) in digits(conv.adjusted_text):
+            value = re.sub(r'^(US)?\$', '', conv.amount_text.split()[0])
+        return check, value
+
+    def _decide(self, claim: claims_mod.Claim, report: Report, value: str | None = None):
         """(verdict, reason, receipt, sources) for one claim; writes nothing."""
         if claim.kind == 'opinion':
             return 'opinion', 'Judgement or advice; not checked.', None, []
@@ -295,14 +347,16 @@ class Checker:
                 JUDGE_SYSTEM,
                 JUDGE_USER.format(
                     article_date=report.date or 'unknown',
-                    claim=json.dumps({'span': claim.span, 'kind': claim.kind, 'value': claim.value}),
+                    claim=json.dumps({'span': claim.span, 'kind': claim.kind,
+                                      'value': value or claim.value}),
                     sources=json.dumps([{'url': s['url'], 'title': s['title'],
                                          'date': s['date'] or 'unknown', 'text': s['text']}
                                         for s in sources])))
         except LLMError as exc:
             return 'unverified', f'Judging failed: {exc}', None, listed
+        judged = dataclasses.replace(claim, value=value) if value else claim
         verdict, receipt, reason = verify.check(
-            claim, answer, pages, article_date=report.date, source_dates=dates)
+            judged, answer, pages, article_date=report.date, source_dates=dates)
         if receipt:
             src = next(s for s in sources if s['url'] == receipt['url'])
             receipt['tier'], receipt['date'], receipt['kind'] = src['tier'], src['date'], src['kind']

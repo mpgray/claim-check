@@ -15,7 +15,13 @@
     <p class="note">This sentence was in the fetched article but not in the page as a browser renders it, so the snapshot has no highlight for it.</p>
   {% endif %}
   {% if c.reason %}<p class="reason">{{ c.reason }}</p>{% endif %}
-  {% if c.receipt %}
+  {% for k in c.checks %}
+    <p class="check check-{{ k.status }}"><span class="ctag">{{ {'ok': '✓ Computed', 'wrong': '✗ Computed', 'unsure': '? Computed'}[k.status] }}</span>
+      {{ k.detail }} <a href="{{ k.url }}" rel="noopener" target="_blank">BLS CPI data</a></p>
+  {% endfor %}
+  {% if c.receipt and c.receipt.kind == 'computed' %}
+    <div class="receipt"><p>Receipt <span class="rmeta">computed · official data</span> {{ c.receipt.quote }}</p></div>
+  {% elif c.receipt %}
     <div class="receipt">
       <p>Receipt <span class="rmeta">{{ c.receipt.tier }}{% if c.receipt.date %} · dated {{ c.receipt.date }}{% endif %}{% if c.receipt.kind == 'pdf' %} · PDF{% endif %}</span>
         <a href="{{ c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>

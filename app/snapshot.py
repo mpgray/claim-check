@@ -108,7 +108,7 @@ class Snapshotter:
     async def _all(self, context, report, out: Path, checker) -> None:
         by_url: dict[str, list] = {}
         for c in report.claims:
-            if c.receipt and c.receipt.get('kind') != 'pdf':
+            if c.receipt and c.receipt.get('kind') not in ('pdf', 'computed'):
                 by_url.setdefault(c.receipt['url'], []).append(c)
         gate = asyncio.Semaphore(PARALLEL_SOURCES)
 
