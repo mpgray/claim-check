@@ -41,6 +41,7 @@ class Report:
     date: str = ''             # the article's declared date
     proposed: int = 0          # claims the extractor proposed, before validation
     truncated_chars: int = 0   # article text past MAX_ARTICLE_CHARS, not read
+    back_matter_chars: int = 0 # reference lists and "see also" cut from the body
     extract_errors: list[str] = field(default_factory=list)
     snapshot: dict = field(default_factory=dict)
     status: str = 'running'    # running | done | error
@@ -152,6 +153,7 @@ class Checker:
         read = [p for chunk in chunks for p in chunk]
         body = '\n\n'.join(read)
         report.url, report.title, report.passages, report.date = page.url, page.title, read, page.date
+        report.back_matter_chars = getattr(page, 'back_matter_chars', 0)
         report.cited_links = _cited_links(page.links, page.url)
         self._link_context = [(urljoin(page.url, h).split('#', 1)[0], ctx)
                               for h, ctx in page.link_context]

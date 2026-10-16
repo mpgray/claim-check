@@ -65,3 +65,15 @@ def test_unrenderable_article_degrades_without_raising(tmp_path):
                     claims=[Claim(id=1, span='Anything at all here.', kind='other', verdict='unverified')])
     Snapshotter(tmp_path).capture(report)
     assert 'article_error' in report.snapshot and 'article_full' not in report.snapshot
+
+
+@needs_browser
+def test_hidden_bracket_tags_do_not_block_a_match(tmp_path):
+    html = ('<p>As of July 2025<sup style="display:none">[update]</sup>, 22 states and the District '
+            'of Columbia have minimum wages above the federal level.</p>')
+    report = Report(url='https://w.example/a', id='t3', claims=[
+        Claim(id=1, span='As of July 2025[update], 22 states and the District of Columbia have '
+                         'minimum wages above the federal level.', kind='figure', verdict='supported')])
+    Snapshotter(tmp_path, html_for=lambda u: html).capture(report)
+    snap = report.claims[0].snapshot
+    assert snap['article_found'] and snap['article_exact'] is False

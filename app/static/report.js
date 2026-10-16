@@ -53,6 +53,8 @@
           document.getElementById('rtitle').textContent = r.title;
           document.title = r.title + ' · Claim Check';
         }
+        var d = document.getElementById('rdate');
+        if (d && r.date) { d.querySelector('span').textContent = r.date; d.hidden = false; }
       });
   }
   function swapClaim(id) {

@@ -87,7 +87,19 @@
   // Exact match first; then start..end anchors (like a text fragment), for
   // pages whose markup inserts something the Python parse did not see.
   function find(idx, text) {
-    var t = norm(text);
+    var m = findNorm(idx, norm(text));
+    if (m) return m;
+    // Short bracketed tags ("[update]", "[1]", "[citation needed]") are often
+    // hidden or restyled in the rendered page; retry without them, inexact.
+    var stripped = norm(text.replace(/\[[^\]]{1,24}\]/g, ''));
+    if (stripped !== norm(text)) {
+      m = findNorm(idx, stripped);
+      if (m) m.exact = false;
+    }
+    return m;
+  }
+
+  function findNorm(idx, t) {
     if (!t) return null;
     var at = idx.text.indexOf(t);
     if (at >= 0) return { start: at, end: at + t.length, exact: true };
@@ -136,10 +148,17 @@
       return res;
     },
     // Underline one item so its crop shows which highlight it is about.
+    // Returns the item's rect in viewport coordinates after scrolling to it,
+    // measured now: pages that grow after load make stored rects stale.
     focus: function (id) {
       CSS.highlights.delete('cc-focus');
-      if (ranges[id]) CSS.highlights.set('cc-focus', new Highlight(ranges[id]));
-      return !!ranges[id];
+      var r = id && ranges[id];
+      if (!r) return null;
+      CSS.highlights.set('cc-focus', new Highlight(r));
+      var b = r.getBoundingClientRect();
+      window.scrollBy(0, b.top - Math.max(60, (window.innerHeight - b.height) / 3));
+      b = r.getBoundingClientRect();
+      return { x: b.left, y: b.top, w: b.width, h: b.height };
     },
     // Overlays (cookie bars, sticky headers, chat bubbles) cover the text a
     // crop is about; take them out of the picture. Nothing is clicked.

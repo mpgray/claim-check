@@ -4,6 +4,7 @@
 {% endif %}
 {% if r.search_error %}<p class="error" role="alert">{{ r.search_error }} Claims were checked only against the links the article cites.</p>{% endif %}
 {% if r.truncated_chars %}<p class="notice">The article is longer than Claim Check reads; the last {{ '{:,}'.format(r.truncated_chars) }} characters were not checked.</p>{% endif %}
+{% if r.back_matter_chars %}<p class="note">The page's reference list and further-reading sections were not checked; they cite other works rather than make the article's claims.</p>{% endif %}
 {% if r.proposed and r.proposed > r.claims | length %}
   {% set over = r.rejected | selectattr('rejected', 'equalto', 'over the claim limit') | list %}
   {% set bad = r.rejected | rejectattr('rejected', 'equalto', 'over the claim limit') | list %}

@@ -39,6 +39,7 @@ class Page:
     kind: str = 'html'           # html | text | pdf
     all_passages: list[str] = field(default_factory=list)   # every visible block
     link_context: list[tuple[str, str]] = field(default_factory=list)  # (href, its passage)
+    back_matter_chars: int = 0   # reference lists, "see also" etc. not part of the body
 
     @property
     def text(self) -> str:
@@ -128,6 +129,23 @@ def readable_passages(html: str) -> list[str]:
     return passages if sum(len(p) for p in passages) >= MIN_READABLE_CHARS else []
 
 
+BACK_MATTER = {'references', 'notes', 'see also', 'further reading', 'external links',
+               'sources', 'citations', 'bibliography', 'footnotes', 'notes and references',
+               'works cited', 'related articles', 'related stories', 'read more', 'more from'}
+
+
+def split_back_matter(passages: list[str], min_share: float = 0.3) -> tuple[list[str], list[str]]:
+    """(body, back matter): cut at the first "References"/"See also"-style
+    heading past the first 30% of the page. A reference list is citation
+    titles, not the article's claims."""
+    start = int(len(passages) * min_share)
+    for i in range(max(start, 1), len(passages)):
+        text = passages[i].strip().strip(':').strip().lower()
+        if len(text) <= 40 and text in BACK_MATTER:
+            return passages[:i], passages[i:]
+    return passages, []
+
+
 @dataclass
 class Parsed:
     title: str
@@ -135,6 +153,7 @@ class Parsed:
     all_passages: list[str]
     links: list[str]                       # hrefs inside the readable body
     link_context: list[tuple[str, str]]
+    back_matter_chars: int = 0             # reference lists etc. cut from the body
 
 
 def parse_document(html: str) -> Parsed:
@@ -142,13 +161,14 @@ def parse_document(html: str) -> Parsed:
     parser.feed(html)
     parser._flush()
     every = [p for p in parser.passages if p]
-    readable = readable_passages(html) or every
+    readable, back = split_back_matter(readable_passages(html) or every)
     body = _norm(' '.join(readable))
     # Keep a link only if the passage it sits in is part of the readable body:
     # this is what drops "related stories" rails and footer link farms.
     context = [(href, passage) for href, passage in parser.links
                if passage and _norm(passage)[:160] in body]
-    return Parsed(parser.title, readable, every, [h for h, _ in context], context)
+    return Parsed(parser.title, readable, every, [h for h, _ in context], context,
+                  sum(len(p) for p in back))
 
 
 def parse_html(html: str) -> tuple[str, list[str], list[str]]:
@@ -252,6 +272,7 @@ def fetch_page(url: str, *, client: httpx.Client | None = None) -> Page:
                         doc = parse_document(text)
                         page.title, page.passages, page.all_passages = doc.title, doc.passages, doc.all_passages
                         page.links, page.link_context = doc.links, doc.link_context
+                        page.back_matter_chars = doc.back_matter_chars
                         page.date = page_date(text)
                 page.passages = [p for p in page.passages if p]
                 if not page.passages:

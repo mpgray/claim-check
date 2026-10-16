@@ -12,24 +12,50 @@ the source with that sentence highlighted.
 ## How it works
 
 ```
-fetch article ─► passages + cited links          app/fetch.py
-      │
-model: extract claims (exact spans)               app/prompts.py, app/llm.py
+fetch article ─► readable body (trafilatura)      app/fetch.py
+      │          + declared date, cited links     app/dates.py
+      │            tied to their passage
+model: extract claims, 30k-char chunks (≤200k)    app/prompts.py, app/llm.py
       │
 code: span must be verbatim; value in span;       app/claims.py
       figures no claim covers → "not checked"
       │
-search (SearXNG) + cited links ─► fetch sources   app/search.py, app/fetch.py
+claim's own citation, then search, then other     app/search.py, app/fetch.py
+      cited links ─► fetch sources (HTML or PDF)
+      │  the article's own site is never a source
       │  each source tiered official/reference/open by host
-model: judge one claim against passages           app/pipeline.py
+model: judge one claim against passages + dates   app/pipeline.py
       │
 code: quote on the cited page? figure in quote?   app/verify.py
-      date for "outdated"? else → unverified
+      date for "outdated"? source older than the
+      claim for "contradicted"? else → unverified
       │
-report: counts, tier mix, text-fragment links     app/templates/report.html
+snapshot: Chromium renders the article and each   app/snapshot.py,
+      source, paints claims/quotes, saves PNGs    app/static/highlight.js
+      │
+report: stored, live-streamed, shareable /r/<id>  app/store.py, app/jobs.py,
+                                                  app/templates/
 ```
 
 Model output never counts until code has checked it. The summary is counting.
+
+### Snapshots
+
+After judging, a headless Chromium (Playwright) opens the article and paints
+every claim in its verdict colour, then opens each receipt's source and paints
+the quote. Each gets a full-page PNG plus a crop per claim, stored in
+`data/snapshots/<report id>/` and shown on the report. The live
+`#:~:text=` link can break when a page changes; the image does not.
+
+- Highlights use the CSS Custom Highlight API, so the page's markup and
+  layout are untouched. Matching mirrors `claims.norm`. Text the rendered page
+  does not contain is reported as not found, never approximated.
+- If the browser is served a different page than the fetch got (a bot check,
+  a consent wall), no image is kept and the report says so.
+- Every browser request goes through the same public-address check as the
+  fetch. Fixed overlays are hidden before capture; nothing is clicked.
+- Pages taller than 16,000 px are captured around the highlights.
+- PDF sources are quoted from their text layer; they get no image.
 
 Ported ideas from articles-ai: passage extraction and focused excerpts
 (`research.py`), the quote-held-to-the-page rule (`supersession._verify`),
@@ -39,9 +65,15 @@ label-boundary domain matching and source tiers.
 
 ```bash
 uv sync
+uv run playwright install chromium   # once, ~300 MB; for snapshots
 uv run python -m pytest -q
 uv run python -m app            # http://127.0.0.1:8050 — offline FakeLLM
 ```
+
+Reports and snapshots go to `data/` (`CC_DATA_DIR`). A check of the same URL
+within an hour reuses the stored report (`CC_CACHE_SECONDS`; `?fresh=1` on
+`/check` forces a new one). `CC_SNAPSHOTS=0` turns snapshots off.
+`/api/check?url=` still runs synchronously and returns JSON.
 
 ### Demo setup: OpenRouter + Gemma 4
 
@@ -72,17 +104,23 @@ against the links the article itself cites ("does the citation say that?").
 
 ## Status
 
-Built: fetch with SSRF guard, passage parsing, claim validation and
-"not checked" figures, tiering, the receipt verifier, OpenAI-compatible client
-plus offline fake, OpenRouter web-plugin search, Gemma 4 default, backend probe, synchronous report page and JSON API, tests (30).
+Built: fetch with SSRF guard, readable-body extraction, page dates, PDF
+sources, claim validation and "not checked" figures, per-claim citations,
+tiering, the receipt verifier with the stale-source rule, OpenAI-compatible
+client plus offline fake, OpenRouter web-plugin search, Gemma 4 default,
+backend probe, stored reports with live progress (SSE), snapshots with
+highlights, JSON API, tests.
 
 Known gaps:
-- The SSRF guard resolves then connects separately, so DNS rebinding is not
-  closed. Pin the connection to the checked address before exposing this
-  publicly.
-- Reports run synchronously; a 15-claim page takes as long as its slowest
-  judge call.
-- No caching between requests.
+- The SSRF guard resolves then connects separately (in the fetch and in the
+  snapshot browser), so DNS rebinding is not closed. Pin the connection to
+  the checked address before exposing this publicly. No rate limiting either.
+- Sites that block headless browsers (Cloudflare) get no snapshot; the
+  report says so.
+- Tiering only knows the domains in `CC_OFFICIAL_DOMAINS` /
+  `CC_REFERENCE_DOMAINS`; a city's own `.gov` site is "open" unless listed.
+- Jobs run in-process threads; a restart marks running reports as
+  interrupted.
 
 ## Hackathon day plan
 

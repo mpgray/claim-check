@@ -71,3 +71,14 @@ def test_unreadable_pdf_is_a_fetch_error():
     with pytest.raises(FetchError):
         from app.fetch import parse_pdf
         parse_pdf(b'not a pdf', 'https://x.example/a.pdf')
+
+
+def test_reference_lists_are_cut_from_the_body_but_not_from_the_top():
+    from app.fetch import split_back_matter
+    body = [f'Article sentence number {i} with enough words to count here.' for i in range(10)]
+    refs = ['References', 'Amazon is raising its minimum wage to $15 for US workers']
+    kept, back = split_back_matter(body + refs)
+    assert kept == body and back == refs
+    # A "Notes" box in the first 30% of the page is not the end of the article.
+    kept, back = split_back_matter(['Notes'] + body)
+    assert back == []
