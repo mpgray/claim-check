@@ -6,6 +6,33 @@ article itself cites.
 """
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+ENV_FILE = Path(__file__).resolve().parents[1] / '.env'
+
+
+def load_env_file(path: Path = ENV_FILE) -> list[str]:
+    """Read KEY=value lines from `.env` into the environment and return the
+    keys set. The file wins over the shell: an edited .env takes effect on the
+    next start without re-sourcing it. Called by the entry points, not on
+    import, so tests never pick up a developer's keys."""
+    if not path.exists():
+        return []
+    keys = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, value = line.removeprefix('export ').partition('=')
+        key, value = key.strip(), value.strip()
+        if ' #' in value and not value.startswith(('"', "'")):
+            value = value.split(' #', 1)[0].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        if key.isidentifier():
+            os.environ[key] = value
+            keys.append(key)
+    return keys
 
 
 def _list(name: str) -> list[str]:

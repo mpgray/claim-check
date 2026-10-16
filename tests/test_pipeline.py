@@ -73,7 +73,8 @@ def _app(checker, tmp_path, **kw):
 
 def test_routes_render(checker, tmp_path):
     client = _app(checker, tmp_path).test_client()
-    assert client.get('/').status_code == 200
+    home = client.get('/')
+    assert home.status_code == 200 and b'sources each' in home.data
     assert client.get('/check').status_code == 400
     started = client.get('/check', query_string={'url': ARTICLE_URL})
     assert started.status_code == 303 and '/r/' in started.location
@@ -246,3 +247,19 @@ def test_a_refused_receipt_is_kept_for_the_report():
     assert wage.verdict == 'unverified' and wage.receipt is None
     assert wage.rejected_receipt['verdict'] == 'supported'
     assert 'seven dollars' in wage.rejected_receipt['quote'] and 'not on the cited page' in wage.rejected_receipt['why']
+
+
+def test_fragment_pages_are_skipped_unless_official():
+    from app.claims import Claim
+    rows = [f'Row {i}' for i in range(200)] + ['The federal minimum wage is $7.25 per hour.']
+    data = Page('https://data.example/table', 'Table', rows)
+    official = Page('https://www.dol.gov/table', 'DOL table', rows)
+
+    class Two:
+        def search(self, q):
+            return [{'url': data.url}, {'url': official.url}]
+    pages = {data.url: data, official.url: official}
+    report = Checker(Config(), FakeLLM(), Two(), fetch=lambda u: pages.get(u) or fake_fetch(u)).run(ARTICLE_URL)
+    wage = next(c for c in report.claims if '7.25' in c.span)
+    assert wage.dropped_fragmentary == 1
+    assert official.url in [s['url'] for s in wage.sources] and data.url not in [s['url'] for s in wage.sources]

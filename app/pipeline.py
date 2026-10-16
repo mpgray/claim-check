@@ -19,7 +19,8 @@ from urllib.parse import urljoin, urlsplit
 from app import claims as claims_mod
 from app import inflation, verify
 from app.config import Config
-from app.fetch import FetchError, Page, article_passages, fetch_page, focused_excerpt
+from app.fetch import (MIN_PROSE_SHARE, FetchError, Page, article_passages, fetch_page,
+                       focused_excerpt, prose_share)
 from app.llm import LLM, LLMError
 from app.prompts import (EXTRACT_SECOND_PASS, EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM,
                          JUDGE_USER)
@@ -498,6 +499,15 @@ class Checker:
                         and not claims_mod.mentions(f'{page.title} {page.text}', on_topic_names)):
                     claim.dropped_offtopic += 1
                     continue
+                # A page of fragments (a Wikidata entity, a library catalogue)
+                # has no sentence to quote; the model stitches labels into a
+                # "quote" that means nothing. Not used as a source, unless it
+                # is an official page: a chart history or a certification
+                # table is the record itself, and its rows can be quoted.
+                if (prose_share(page.source_passages) < MIN_PROSE_SHARE
+                        and self._tier(page.url) != 'official'):
+                    claim.dropped_fragmentary += 1
+                    continue
                 state['keys'].add(key)
                 state['own_read'] += url in own
                 pages[page.url] = page.text
@@ -538,7 +548,11 @@ class Checker:
         rejected = None
         claimed = str(answer.get('verdict') or '').lower()
         if verdict == 'unverified' and claimed in verify.JUDGED:
-            # Shown on the report: what the model cited, and why code refused it.
-            rejected = {'verdict': claimed, 'url': str(answer.get('url') or '')[:500],
+            # Kept for the report: what the model cited, and why code refused
+            # it. The reader gets one plain sentence; the machine reason stays
+            # in the data.
+            cited = str(answer.get('url') or '')[:500]
+            rejected = {'verdict': claimed, 'url': cited,
                         'quote': str(answer.get('quote') or '').strip()[:600], 'why': reason}
+            reason = verify.plain_refusal(reason, claimed, cited)
         return verdict, reason, receipt, listed, rejected

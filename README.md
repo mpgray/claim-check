@@ -21,9 +21,11 @@ Wikipedia article, from pasting the link to the highlighted snapshots.
 - **Receipts, held to the page.** A supported, contradicted or outdated
   verdict needs a quote (or up to three excerpts of one page) that code finds
   word for word on a page that was
-  actually fetched. A figure claim needs every number and date of it in the
-  quote, compared by value ("100 million" matches "100,000,000"; "150
-  million" never does). A failed check becomes "unverified" with the reason,
+  actually fetched. A figure claim needs its numbers and dates in the quote,
+  compared by value and the way the claim states them: "exceeding 100
+  million" is met by 104 million, "about 500" by 520, a plain "13 million" by
+  13.4 million; a plain "100 million" is never met by 150 million. Pages that
+  are lists of fragments (Wikidata, catalogues) are not used as sources. A failed check becomes "unverified" with the reason,
   and the refused quote is shown; it is never retried into a pass.
 - **The article is never its own source.** Search results from the article's
   own site, or an archived copy of it, are thrown out.
@@ -69,7 +71,6 @@ cd claim-check
 uv sync
 uv run playwright install chromium     # once, about 300 MB, for snapshots
 cp .env.example .env                    # then put your OpenRouter key in it
-set -a; . ./.env; set +a
 uv run python -m scripts.check_backend  # checks the model and search work
 uv run python -m app                    # http://127.0.0.1:8050
 ```
@@ -83,7 +84,9 @@ uv run python -m pytest -q
 
 ## Configuration
 
-Everything is set by environment variables; `.env.example` lists them all.
+Everything is set in `.env` (the app reads it on every start, and editing it
+restarts the dev server); `.env.example` lists every setting. The home page
+shows the limits in effect.
 
 | Variable | Default | What it does |
 |---|---|---|

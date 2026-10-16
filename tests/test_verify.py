@@ -122,3 +122,13 @@ def test_excerpts_far_apart_or_too_many_are_refused():
     assert 'too far apart' in find_excerpts('Born on June 7, 1958 in Minneapolis ... He died on April 21, 2016 at home', far)[1]
     many = ' ... '.join(['Filler sentence about his career'] * 4)
     assert 'more than 3' in find_excerpts(many, BIO)[1]
+
+
+def test_a_refusal_reads_as_one_plain_sentence():
+    from app.verify import plain_refusal
+    text = plain_refusal("Receipt failed: the quote does not contain the claim's figure (at least 100,000,000).",
+                         'supported', 'https://prince.org/msg/7/123')
+    assert text == ('Not confirmed: the model called this supported citing prince.org, '
+                    "but its quote doesn't give at least 100,000,000.")
+    assert 'more than three pieces' in plain_refusal('Receipt failed: the quote has more than 3 excerpts.',
+                                                     'supported', 'https://www.wikidata.org/wiki/Q7542')

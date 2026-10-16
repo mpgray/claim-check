@@ -54,3 +54,26 @@ def test_verify_names_the_missing_part_of_a_date_range():
                   kind='date', value='June 7, 1958 – April 21, 2016')
     verdict, _, reason = check(claim, {'verdict': 'supported', 'url': url, 'quote': quote}, {url: quote})
     assert verdict == 'unverified' and '2016-04-21' in reason
+
+
+PRINCE = 'With estimated sales exceeding 100 million records, Prince is one of the best-selling artists.'
+
+
+@pytest.mark.parametrize('value, quote, span, ok', [
+    ('100 million', 'Total final estimated RECORDS sold by Prince since 1978 = 104m', PRINCE, True),
+    ('100 million', 'revenue of $2 trillion', PRINCE, False),                       # absurdly far
+    ('100 million', 'He sold 150 million records', 'He sold 100 million records.', False),
+    ('13 million', 'Purple Rain has sold 13.4 million copies', 'It sold 13 million copies.', True),
+    ('13.4 million', 'Purple Rain has sold 13 million copies', 'It sold 13.4 million copies.', False),
+    ('500', 'about 520 people attended', 'Nearly 500 people attended.', True),
+    ('500', 'about 600 people attended', 'Nearly 500 people attended.', False),
+    ('$20', 'tickets were $15', 'Tickets cost up to $20.', True),
+    ('$20', 'tickets were $25', 'Tickets cost up to $20.', False),
+    ('10', 'It reached number 3 on the chart', 'It was a top 10 hit.', False),      # "top" is not "at least"
+])
+def test_figures_are_read_the_way_the_claim_states_them(value, quote, span, ok):
+    assert (missing(value, quote, span) == []) is ok
+
+
+def test_a_qualified_refusal_says_what_was_needed():
+    assert missing('100 million', 'He sold 90 million records', PRINCE) == ['at least 100,000,000']

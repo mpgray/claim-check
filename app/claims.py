@@ -51,6 +51,7 @@ class Claim:
     citations: list[dict] = field(default_factory=list)  # links in the claim's own passage, and what they said
     dropped_offtopic: int = 0  # sources read that never mention the article's subject
     rejected_receipt: dict | None = None  # what the model cited when code refused it
+    dropped_fragmentary: int = 0  # sources that were lists of fragments, not prose
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:

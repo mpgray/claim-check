@@ -8,14 +8,18 @@ actually searched (annotations present), and prints what it used.
 import sys
 import time
 
-from app import build_checker
-from app.config import Config
+from app.config import load_env_file
+
+load_env_file()
+
+from app import build_checker  # noqa: E402
+from app.config import Config  # noqa: E402
 
 
 def main() -> int:
     cfg = Config()
     if not (cfg.llm_base_url and cfg.llm_model):
-        print('No model configured: set CC_OPENROUTER_API_KEY (or CC_LLM_*).')
+        print('No model configured: set CC_OPENROUTER_API_KEY (or CC_LLM_*) in .env.')
         return 1
     checker = build_checker(cfg)
     ok = True

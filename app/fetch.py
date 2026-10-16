@@ -259,6 +259,19 @@ def parse_pdf(data: bytes, url: str) -> tuple[str, list[str]]:
     return title, passages
 
 
+PROSE_WORDS = 8          # a passage this long reads as a sentence, not a label
+MIN_PROSE_SHARE = 0.25   # below this a page is a list of fragments (a data or catalogue page)
+
+
+def prose_share(passages: list[str]) -> float:
+    """Share of a page's text that sits in sentence-length passages. Wikidata
+    is ~1%, a catalogue page little more; Wikipedia ~85%, a BLS table ~64%."""
+    total = sum(len(p) for p in passages)
+    if not total:
+        return 0.0
+    return sum(len(p) for p in passages if len(p.split()) >= PROSE_WORDS) / total
+
+
 def article_passages(passages: list[str], min_words: int = 8) -> list[str]:
     """Drop menu crumbs and bylines; keep sentences a claim can live in."""
     return [p for p in passages if len(p.split()) >= min_words]

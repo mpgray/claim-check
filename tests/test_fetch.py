@@ -99,3 +99,24 @@ def test_wikipedia_footnotes_are_followed_to_their_citations():
     doc = parse_document(html)
     urls = [u for u, ctx, _ in doc.link_context if ctx.startswith('He played 96 concerts')]
     assert urls == ['https://www.csmonitor.com/2005/x', 'https://books.example/smith']
+
+
+def test_fragment_pages_are_told_apart_from_prose_and_tables():
+    from app.fetch import MIN_PROSE_SHARE, prose_share
+    wikidata = ['Prince', 'instance of', 'human', 'sex or gender', 'male', 'date of birth', '7 June 1958'] * 50
+    article = ['Prince was an American singer, songwriter and musician from Minneapolis, Minnesota.'] * 10
+    table = ['Hourly workers at or below the federal minimum wage by state, 2024 annual averages.',
+             'Alabama', '1.0', 'Alaska', '0.4', 'Arizona', '0.6']
+    assert prose_share(wikidata) < MIN_PROSE_SHARE <= prose_share(table) <= prose_share(article)
+
+
+def test_env_file_wins_over_a_stale_shell(tmp_path, monkeypatch):
+    from app.config import load_env_file
+    env = tmp_path / '.env'
+    env.write_text('# settings\nexport CC_MAX_SOURCES=5\nCC_LLM_MODEL="m/x"  \nCC_WORKERS=10   # parallel\n')
+    monkeypatch.setenv('CC_MAX_SOURCES', '3')
+    for key in ('CC_LLM_MODEL', 'CC_WORKERS'):
+        monkeypatch.delenv(key, raising=False)
+    assert load_env_file(env) == ['CC_MAX_SOURCES', 'CC_LLM_MODEL', 'CC_WORKERS']
+    import os
+    assert (os.environ['CC_MAX_SOURCES'], os.environ['CC_LLM_MODEL'], os.environ['CC_WORKERS']) == ('5', 'm/x', '10')

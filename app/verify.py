@@ -124,8 +124,9 @@ def check(claim: Claim, answer: dict, pages: dict[str, str], *,
     quote = ' … '.join(excerpts)
     if claim.kind in ('figure', 'date') and verdict == 'supported' and claim.value:
         # Compared by value ("100 million" is "100,000,000"; each date of a
-        # range on its own); text comparison only for values with no figure.
-        gaps = figures.missing(claim.value, quote)
+        # range on its own) and as the claim states it ("exceeding 100
+        # million" is met by 104 million); text only for values with no figure.
+        gaps = figures.missing(claim.value, quote, claim.span)
         if gaps is None and _digits(claim.value) not in _digits(quote):
             return 'unverified', None, "Receipt failed: the quote does not contain the claim's figure."
         if gaps:
@@ -165,3 +166,29 @@ def text_fragment_url(url: str, *quotes: str) -> str:
     (several excerpts become several `text=` directives)."""
     base = url.split('#', 1)[0]
     return f"{base}#:~:{'&'.join(_directive(q) for q in quotes if q.strip())}"
+
+
+_PLAIN = [
+    ('not one that was read', "points to a page that wasn't read"),
+    ('no usable quote', 'gave no usable quote'),
+    ('more than', 'stitched together more than three pieces of the page'),
+    ('too far apart', 'joined passages that are far apart on the page'),
+    ('too short', 'included a fragment too short to check'),
+    ('not on the cited page', "doesn't appear word for word on that page"),
+    ('predates', 'comes from a source older than the claim, so it cannot show it is wrong'),
+    ('needs the date', "didn't say when it changed"),
+]
+
+
+def plain_refusal(why: str, verdict: str, url: str) -> str:
+    """One sentence for a reader: what the model said, where, and why code
+    did not accept it. The machine reason stays on the claim's data."""
+    host = url.split('/')[2] if url.count('/') >= 2 else 'a page'
+    m = re.search(r"figure \((.+)\)", why)
+    if m:
+        problem = f"doesn't give {m.group(1)}"
+    elif "figure" in why:
+        problem = "doesn't contain the claim's figure"
+    else:
+        problem = next((text for key, text in _PLAIN if key in why), 'could not be checked')
+    return f'Not confirmed: the model called this {verdict} citing {host}, but its quote {problem}.'

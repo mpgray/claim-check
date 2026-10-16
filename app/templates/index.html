@@ -13,6 +13,8 @@
     </div>
   </form>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if cfg %}<p class="limits">Up to <strong>{{ cfg.max_claims }}</strong> claims per article ·
+    <strong>{{ cfg.max_sources_per_claim }}</strong> sources each · {{ cfg.workers }} at a time{% if cfg.llm_model %} · {{ cfg.llm_model }}{% endif %}</p>{% endif %}
   {% if fake %}<p class="note">Running without a model: the offline checker
      matches figures literally. Set <code>CC_OPENROUTER_API_KEY</code> (or
      <code>CC_LLM_BASE_URL</code> and <code>CC_LLM_MODEL</code>) for real checks.</p>{% endif %}

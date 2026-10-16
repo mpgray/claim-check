@@ -15,8 +15,9 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
   excerpts joined by "...", all within 5,000 characters; the receipt is the
   page's own text), contains every number and date of
   the claim's value when it is a figure (compared by value in `app/figures.py`:
-  "100 million" is "100,000,000", each date of a range on its own; never a
-  near miss), and `outdated` carries a date (`app/verify.check`). A failed check becomes
+  "100 million" is "100,000,000", each date of a range on its own, and read
+  as the claim states it: "more than X" needs at least X, "about X" within
+  10%, a plain X equal at the precision written; never a near miss), and `outdated` carries a date (`app/verify.check`). A failed check becomes
   `unverified` with the reason; it is never retried into a pass.
 - A `contradicted` from a source older than the claim's moment (the span's
   year, else the article's date) becomes `unverified` (`verify.stale_contradiction`).
@@ -25,7 +26,10 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
   text names it (`claims.validate_subject`). Every search query names it, and
   a source page that names neither it nor a specific name from the claim
   (`claims.entities`) is dropped before judging (the claim's own citations
-  are exempt). A refused receipt is kept on the claim and shown, never used.
+  are exempt). A page of fragments (under 25% of its text in sentences:
+  Wikidata, catalogues) is not a source unless its tier is official (a chart
+  history or certification table is the record itself). A refused receipt is kept on the
+  claim and summarised in one plain sentence, never used.
 - Fixes stay generic: this checks ANY article, so no topic-specific data
   (a game database, a curated per-topic domain list) is a source of truth.
 - Source tier comes from the host, never from the model.

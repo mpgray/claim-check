@@ -56,6 +56,7 @@ class Date:
 class Number:
     value: float
     percent: bool = False
+    step: float = 0.0     # half a unit of the last digit written: "13 million" -> 500,000
 
 
 def _clean(text: str) -> str:
@@ -90,13 +91,13 @@ def numbers(text: str) -> list[Number]:
     out = []
     for m in NUMBER_RE.finditer(text):
         value = float(m['num'].replace(',', ''))
+        decimals = len(m['num'].split('.', 1)[1]) if '.' in m['num'] else 0
         # A lone "m"/"b"/"k" is a scale only written against the number ("$5m").
-        scale = (m['scale'] or m['short'] or '').lower()
-        value *= SCALE.get(scale, 1)
-        out.append(Number(value, bool(m['pct'])))
+        scale = SCALE.get((m['scale'] or m['short'] or '').lower(), 1)
+        out.append(Number(value * scale, bool(m['pct']), 0.5 * 10 ** -decimals * scale))
     for m in WORD_RE.finditer(text):
-        value = WORDS[m['word'].lower()] * SCALE.get((m['scale'] or '').lower(), 1)
-        out.append(Number(float(value)))
+        scale = SCALE.get((m['scale'] or '').lower(), 1)
+        out.append(Number(float(WORDS[m['word'].lower()] * scale), False, 0.5 * scale))
     return out
 
 
@@ -113,13 +114,75 @@ def _same(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
 
 
-def missing(value: str, quote: str) -> list[str] | None:
-    """The parts of `value` the quote does not contain, compared by value.
-    [] means everything is there; None means the value has no figure or date
-    this module understands (the caller falls back to comparing text)."""
+# How the claim states its figure, read from the words just before it.
+_MIN = (r'more than|over|exceed(?:s|ed|ing)?|at least|upwards of|in excess of|north of|'
+        r'no fewer than|no less than|surpass(?:es|ed|ing)?')
+_MAX = r'less than|fewer than|under|below|at most|up to|no more than|as many as|as much as'
+_APPROX = (r'about|around|roughly|approximately|nearly|almost|some|close to|circa|'
+           r'an estimated|estimated|more or less|~')
+_QUALIFIER = re.compile(rf'(?:(?P<min>{_MIN})|(?P<max>{_MAX})|(?P<approx>{_APPROX}))'
+                        r'\s*(?:(?:an?|the)\s+)?(?:us\s*)?\$?\s*$', re.I)
+_TOLERANCE = 0.10        # "about", "nearly": within 10%
+_RANGE = 10              # "more than 100 million" is not met by "$2 trillion"
+
+
+_LEAD = re.compile(rf'^\s*(?:(?P<min>{_MIN})|(?P<max>{_MAX})|(?P<approx>{_APPROX}))\b', re.I)
+
+
+def _kind(m) -> str:
+    return next(k for k in ('min', 'max', 'approx') if m.group(k))
+
+
+def qualifier(value: str, span: str) -> str:
+    """'min', 'max', 'approx' or '' for how `span` states `value`: the
+    qualifier closest before the figure wins ("estimated sales exceeding 100
+    million" is 'min')."""
+    v = _clean(value).lower().strip()
+    lead = _LEAD.match(v)
+    if lead:
+        return _kind(lead)
+    flat = _clean(span).lower()
+    at = flat.find(v) if v else -1
+    if at > 0:
+        m = _QUALIFIER.search(flat[max(0, at - 40):at])
+        if m:
+            return _kind(m)
+    return ''
+
+
+def _satisfies(n: Number, q: Number, how: str) -> bool:
+    if n.percent != q.percent:
+        return False
+    v, x = n.value, q.value
+    if how == 'min':
+        return v <= x <= v * _RANGE if v > 0 else x >= v
+    if how == 'max':
+        return v / _RANGE <= x <= v if v > 0 else x <= v
+    if how == 'approx':
+        return abs(x - v) <= _TOLERANCE * abs(v)
+    # As written: equal to the claim's own rounding ("13 million" is met by 13.4 million).
+    return abs(x - v) <= max(n.step, 1e-9 * max(1.0, abs(v)))
+
+
+def _label(n: Number, how: str) -> str:
+    text = f'{n.value:,.10g}' + ('%' if n.percent else '')
+    return {'min': f'at least {text}', 'max': f'at most {text}', 'approx': f'about {text}'}.get(how, text)
+
+
+def missing(value: str, quote: str, span: str = '') -> list[str] | None:
+    """The parts of `value` the quote does not support, compared by value.
+
+    Dates and years must match. A number is read the way the claim states it
+    (`span`): "more than / at least X" needs a source figure at or above X,
+    "under / up to X" one at or below, "about / nearly X" one within 10%, and
+    a plain X one equal to X at the precision X was written. [] means
+    supported; None means the value has no figure or date this module reads
+    (the caller falls back to comparing text).
+    """
     v_dates, v_numbers, v_years = parse(value)
     if not (v_dates or v_numbers or v_years):
         return None
+    how = qualifier(value, span or value)
     q_dates, q_numbers, q_years = parse(quote)
     q_all_years = set(q_years) | {d.year for d in q_dates} | \
         {int(n.value) for n in q_numbers if n.value.is_integer() and 1500 <= n.value <= 2100}
@@ -133,6 +196,6 @@ def missing(value: str, quote: str) -> list[str] | None:
         if y not in q_all_years:
             out.append(str(y))
     for n in v_numbers:
-        if not any(_same(n.value, q.value) and n.percent == q.percent for q in q_numbers):
-            out.append(f'{n.value:,.10g}' + ('%' if n.percent else ''))
+        if not any(_satisfies(n, q, how) for q in q_numbers):
+            out.append(_label(n, how))
     return out

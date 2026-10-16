@@ -81,14 +81,14 @@ def create_app(checker_factory=None, *, store: Store | None = None,
 
     @app.get('/')
     def index():
-        return render_template('index.html', fake=app.config['FAKE_LLM'], recent=store.recent(10))
+        return render_template('index.html', fake=app.config['FAKE_LLM'], recent=store.recent(10), cfg=cfg)
 
     @app.get('/check')
     def check():
         url = (request.args.get('url') or '').strip()
         if not url:
             return render_template('index.html', fake=app.config['FAKE_LLM'], recent=store.recent(10),
-                                   error='Paste an article URL to check.'), 400
+                                   cfg=cfg, error='Paste an article URL to check.'), 400
         if not request.args.get('fresh') and cfg.cache_seconds > 0:
             cached = store.latest_for(url, cfg.cache_seconds)
             if cached:
