@@ -55,5 +55,6 @@
       <button type="button" class="fbtn" data-vote="down" aria-label="No, the verdict is wrong">👎 <span>{{ fb.down or '' }}</span></button>
     </div>
   {% endif %}
+  {% if c.dropped_offtopic %}<p class="note">{{ c.dropped_offtopic }} search result{{ 's' if c.dropped_offtopic > 1 }} never mentioned {{ r.subject or "the article's subject" }} and {{ 'were' if c.dropped_offtopic > 1 else 'was' }} not used.</p>{% endif %}
   {% if c.dropped_self %}<p class="note">{{ c.dropped_self }} search result{{ 's' if c.dropped_self > 1 }} came from the article's own site and {{ 'were' if c.dropped_self > 1 else 'was' }} not used.</p>{% endif %}
 </li>

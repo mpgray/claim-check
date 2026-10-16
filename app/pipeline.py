@@ -47,6 +47,8 @@ class Report:
     extract_errors: list[str] = field(default_factory=list)
     snapshot: dict = field(default_factory=dict)
     status: str = 'running'    # running | done | error
+    subject: str = ''          # what the article is about, confirmed in its text
+    subject_names: list[str] = field(default_factory=list)
     id: str = ''               # the stored report's id, when there is one
 
 
@@ -245,24 +247,28 @@ class Checker:
     def _extract(self, chunks: list[list[str]], report: Report) -> list[dict]:
         total = sum(len(p) for chunk in chunks for p in chunk) or 1
 
-        def one(chunk: list[str]) -> list[dict]:
+        def one(chunk: list[str]) -> dict:
             text = '\n\n'.join(chunk)
             # Each chunk asks for its share of the limit, so a long article's
             # claims are not all taken from its first screen.
             share = max(3, math.ceil(self.cfg.max_claims * len(text) / total) + 1)
             return self.llm.complete_json(
                 EXTRACT_SYSTEM.replace('{limit}', str(share)),
-                EXTRACT_USER.format(article_date=report.date or 'unknown', article=text)
-            ).get('claims', []) or []
+                EXTRACT_USER.format(title=report.title or 'unknown',
+                                    article_date=report.date or 'unknown', article=text)) or {}
 
-        results: list[list[dict]] = [[] for _ in chunks]
+        answers: list[dict] = [{} for _ in chunks]
         with ThreadPoolExecutor(min(self.cfg.workers, len(chunks) or 1)) as pool:
             futures = {pool.submit(one, chunk): i for i, chunk in enumerate(chunks)}
             for fut in as_completed(futures):
                 try:
-                    results[futures[fut]] = fut.result()
+                    answers[futures[fut]] = fut.result()
                 except LLMError as exc:
                     report.extract_errors.append(str(exc))
+        body = ' '.join(p for chunk in chunks for p in chunk)
+        report.subject, report.subject_names = claims_mod.validate_subject(
+            answers, report.title, body)
+        results = [a.get('claims') or [] for a in answers]
         # Interleave so the claim limit samples every chunk, not just the first.
         out, depth = [], max((len(r) for r in results), default=0)
         for i in range(depth):
@@ -308,26 +314,44 @@ class Checker:
         return tier(url, self.cfg.official_domains, self.cfg.reference_domains,
                     self.cfg.default_tiers)
 
+    def _search(self, query: str) -> list[str]:
+        """Search result URLs, sources of record first; [] on an outage (reported)."""
+        try:
+            found = [r['url'] for r in self.search.search(query)]
+        except Exception as exc:
+            # A search outage leaves the cited-link path, but never
+            # silently: the report says search was down, or a page of
+            # "unverified" would look like an article nobody can support.
+            self.search_error = f'Search failed: {exc}'[:300]
+            return []
+        # Sources of record are read first; the source limit is small.
+        return sorted(found, key=lambda u: TIER_RANK[self._tier(u)])
+
+    @staticmethod
+    def anchored(query: str, report: Report) -> str:
+        """The claim's query, naming the article's subject. A sentence read
+        alone ("Undermining is a foundation piece losing substrate contact")
+        searches every game ever made unless the query says which one."""
+        if not report.subject or not query or claims_mod.mentions(query, report.subject_names):
+            return query
+        return f'{report.subject} {query}'
+
     def _candidate_urls(self, claim: claims_mod.Claim, cited: list[str],
-                        article_url: str) -> list[str]:
+                        report: Report) -> list[str]:
         own_cites = self._own_citations(claim, cited)
         # The claim's own citations are read first (an original and its
         # archived copy are alternates); search leads come next, so the
         # citation is checked rather than trusted.
         urls: list[str] = own_cites[:4]
         if claim.query:
-            try:
-                found = [r['url'] for r in self.search.search(claim.query)]
-                # Sources of record are read first; the source limit is small.
-                urls += sorted(found, key=lambda u: TIER_RANK[self._tier(u)])
-            except Exception as exc:
-                # A search outage leaves the cited-link path, but never
-                # silently: the report says search was down, or a page of
-                # "unverified" would look like an article nobody can support.
-                self.search_error = f'Search failed: {exc}'[:300]
+            urls += self._search(self.anchored(claim.query, report))
         # The article's own citations are leads too, but never the only lead
         # when search is available: a citation is what is being checked.
         urls += own_cites[4:] + cited
+        return self._not_self(urls, claim, report.url)
+
+    @staticmethod
+    def _not_self(urls: list[str], claim: claims_mod.Claim, article_url: str) -> list[str]:
         own = site(article_url)
         seen, out = set(), []
         for u in urls:
@@ -385,24 +409,42 @@ class Checker:
         dates: dict[str, str] = {}
         sources = []
         own = set(self._own_citations(claim, report.cited_links))
-        own_read, read_keys = 0, set()
-        for url in self._candidate_urls(claim, report.cited_links, report.url):
-            if len(sources) >= self.cfg.max_sources_per_claim:
-                break
-            key = unarchive(url).split('://', 1)[-1].rstrip('/')
-            if key in read_keys or (url in own and own_read >= 2):
-                continue        # the archived twin of a page already read, or enough citations
-            page = self._page(url)
-            if not page or site(page.url) == site(report.url):
-                continue
-            read_keys.add(key)
-            own_read += url in own
-            pages[page.url] = page.text
-            dates[page.url] = page.date
-            sources.append({'url': page.url, 'requested': url, 'title': page.title, 'date': page.date,
-                            'kind': page.kind,
-                            'text': focused_excerpt(page.source_passages, claim.span),
-                            'tier': self._tier(page.url)})
+        state = {'own_read': 0, 'keys': set(), 'tried': set()}
+
+        def read(urls):
+            for url in urls:
+                if len(sources) >= self.cfg.max_sources_per_claim:
+                    return
+                key = unarchive(url).split('://', 1)[-1].rstrip('/')
+                if url in state['tried'] or key in state['keys'] or (url in own and state['own_read'] >= 2):
+                    continue    # tried already, the archived twin of a page read, or enough citations
+                state['tried'].add(url)
+                page = self._page(url)
+                if not page or site(page.url) == site(report.url):
+                    continue
+                # A page that never names the article's subject is about
+                # something else (another game's wiki, a soil-engineering
+                # paper), however well it matches the words. The claim's own
+                # citations are exempt: the article chose them.
+                if (report.subject_names and url not in own
+                        and not claims_mod.mentions(f'{page.title} {page.text}', report.subject_names)):
+                    claim.dropped_offtopic += 1
+                    continue
+                state['keys'].add(key)
+                state['own_read'] += url in own
+                pages[page.url] = page.text
+                dates[page.url] = page.date
+                sources.append({'url': page.url, 'requested': url, 'title': page.title,
+                                'date': page.date, 'kind': page.kind,
+                                'text': focused_excerpt(page.source_passages, claim.span),
+                                'tier': self._tier(page.url)})
+
+        read(self._candidate_urls(claim, report.cited_links, report))
+        if len(sources) < self.cfg.max_sources_per_claim and report.subject and claim.query \
+                and claim.dropped_offtopic:
+            # Off-topic results crowded out the source limit: search once more
+            # with the subject as an exact phrase.
+            read(self._not_self(self._search(f'"{report.subject}" {claim.query}'), claim, report.url))
         listed = [{k: s[k] for k in ('url', 'requested', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
             return 'unverified', 'No readable source was found.', None, listed

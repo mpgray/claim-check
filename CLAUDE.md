@@ -16,6 +16,12 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
 - A `contradicted` from a source older than the claim's moment (the span's
   year, else the article's date) becomes `unverified` (`verify.stale_contradiction`).
 - The article's own site is never a source (`pipeline.site`).
+- The article's subject is the model's proposal, kept only if the article's
+  text names it (`claims.validate_subject`). Every search query names it, and
+  a source page that never mentions it is dropped before judging (the claim's
+  own citations are exempt).
+- Fixes stay generic: this checks ANY article, so no topic-specific data
+  (a game database, a curated per-topic domain list) is a source of truth.
 - Source tier comes from the host, never from the model.
 - Summary numbers are counts.
 - An inflation conversion is computed by code from BLS CPI data

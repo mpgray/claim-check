@@ -17,6 +17,7 @@
   <h1 id="rtitle">{{ r.title or ('Reading the article…' if r.status == 'running' else 'Untitled page') }}</h1>
   <p class="src"><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>
   <p class="meta">
+    {% if r.subject %}<span>About <strong>{{ r.subject }}</strong></span>{% endif %}
     <span id="rdate" {% if not r.date %}hidden{% endif %}>Article dated <span>{{ r.date }}</span></span>
     <span>Checked <time datetime="{{ meta.created_at | int }}" data-ts="{{ meta.created_at }}"></time></span>
     <button type="button" class="linkish" data-copy="{{ url_for('report', rid=rid, _external=True) }}">Copy link</button>

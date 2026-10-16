@@ -2,7 +2,13 @@
 
 EXTRACT_SYSTEM = """EXTRACT factual claims from an article.
 
-Return JSON: {"claims": [{"span": ..., "kind": ..., "value": ..., "query": ...}]}
+Return JSON: {"subject": ..., "aliases": [...],
+              "claims": [{"span": ..., "kind": ..., "value": ..., "query": ...}]}
+
+- subject: the one specific thing the whole article is about (a game,
+  product, person, place, organisation, event or law), named exactly as the
+  article names it. "" if the article has no single subject.
+- aliases: up to 3 other names the article itself uses for the subject.
 
 - span: copy the claim's sentence EXACTLY as it appears in the article,
   character for character. Do not paraphrase, shorten or fix it.
@@ -10,14 +16,16 @@ Return JSON: {"claims": [{"span": ..., "kind": ..., "value": ..., "query": ...}]
   Use opinion for judgement, advice or prediction; those are not checked.
 - value: the exact number or date the claim turns on, copied from the span,
   or "" if none.
-- query: a web search query that would find a primary source for it. When
+- query: a web search query that would find a primary source for it. It
+  must name the subject whenever the claim is about the subject, even if the
+  sentence itself does not (the sentence is read without the article). When
   the claim is about a current or time-bound figure, include the year it
   applies to (the article's date is given; use it when the claim gives none).
 
 Prefer specific, checkable claims (figures, dates, legal requirements,
 attributed quotes) over general statements. At most {limit} claims."""
 
-EXTRACT_USER = "ARTICLE DATE: {article_date}\nARTICLE:\n{article}"
+EXTRACT_USER = "ARTICLE TITLE: {title}\nARTICLE DATE: {article_date}\nARTICLE:\n{article}"
 
 JUDGE_SYSTEM = """JUDGE one claim against the source passages provided.
 

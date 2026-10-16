@@ -49,6 +49,7 @@ class Claim:
     snapshot: dict | None = None
     checks: list[dict] = field(default_factory=list)   # computed by code (app.inflation)
     citations: list[dict] = field(default_factory=list)  # links in the claim's own passage, and what they said
+    dropped_offtopic: int = 0  # sources read that never mention the article's subject
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:
@@ -105,3 +106,41 @@ def missed(article_text: str, claims: list[Claim]) -> list[str]:
             seen.add(key)
             out.append(token)
     return out
+
+
+def topic_key(text: str) -> str:
+    """`norm` with punctuation dropped: "Dune: Awakening" and "Dune Awakening"
+    are the same subject."""
+    return ' '.join(re.sub(r'[^\w\s]', ' ', norm(text)).split())
+
+
+def _specific(key: str) -> bool:
+    # A name too short or too common to tell pages apart ("Dune" would let
+    # every page about the films through) is not used to filter sources.
+    return len(key) >= 5 or len(key.split()) >= 2
+
+
+def validate_subject(candidates: list[dict], title: str, body: str) -> tuple[str, list[str]]:
+    """(subject, its names) from the extractor, kept only if the article uses
+    them: the model proposes the subject, the article's own text confirms it."""
+    hay = f' {topic_key(title + " " + body)} '
+    for cand in candidates:
+        subject = str((cand or {}).get('subject') or '').strip()
+        key = topic_key(subject)
+        if not key or not _specific(key) or f' {key} ' not in hay:
+            continue
+        names, keys = [subject], {key}
+        for alias in (cand.get('aliases') or [])[:6]:
+            alias = str(alias).strip()
+            k = topic_key(alias)
+            if k and k not in keys and _specific(k) and f' {k} ' in hay:
+                names.append(alias)
+                keys.add(k)
+        return subject, names[:4]
+    return '', []
+
+
+def mentions(text: str, names: list[str], limit: int = 300_000) -> bool:
+    """Does this text name any of `names` (whole words, punctuation-blind)?"""
+    hay = f' {topic_key(text[:limit])} '
+    return any(f' {topic_key(n)} ' in hay for n in names if topic_key(n))

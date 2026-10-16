@@ -16,6 +16,8 @@ fetch article ─► readable body (trafilatura)      app/fetch.py
       │          + declared date, cited links     app/dates.py
       │            tied to their passage
 model: extract claims, 30k-char chunks (≤200k)    app/prompts.py, app/llm.py
+      │  and the article's subject; code keeps the
+      │  subject only if the article's text names it
       │
 code: span must be verbatim; value in span;       app/claims.py
       figures no claim covers → "not checked"
@@ -23,7 +25,10 @@ code: span must be verbatim; value in span;       app/claims.py
 claim's own citations (Wikipedia footnotes are   app/search.py, app/fetch.py
       followed to the reference list), then search
       results official-first, then other cited links
-      ─► fetch sources (HTML or PDF)
+      (every query names the subject) ─► fetch sources
+      (HTML or PDF); a source that never names the
+      subject is dropped, and one exact-phrase retry
+      search refills the slot
       │  the article's own site is never a source
       │  each source tiered official/reference/open by host
 code: inflation conversions computed from BLS     app/inflation.py
