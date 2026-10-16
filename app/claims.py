@@ -130,8 +130,11 @@ def validate_subject(candidates: list[dict], title: str, body: str) -> tuple[str
         if not key or not _specific(key) or f' {key} ' not in hay:
             continue
         names, keys = [subject], {key}
-        for alias in (cand.get('aliases') or [])[:6]:
-            alias = str(alias).strip()
+        # "Prince (musician)": the parenthetical is a title's disambiguation,
+        # not part of the name sources use, so the bare name counts too.
+        alternates = [re.sub(r'\s*\([^)]*\)', '', subject).strip()]
+        alternates += [str(a).strip() for a in (cand.get('aliases') or [])[:6]]
+        for alias in alternates:
             k = topic_key(alias)
             if k and k not in keys and _specific(k) and f' {k} ' in hay:
                 names.append(alias)

@@ -64,3 +64,10 @@ def test_off_topic_sources_are_dropped_and_a_quoted_retry_fills_the_slot():
     assert queries[1].startswith('"Dune: Awakening"')
     assert claim.dropped_offtopic == 1 and [s['url'] for s in claim.sources] == [GAME_WIKI.url]
     assert claim.verdict == 'contradicted'
+
+
+def test_a_disambiguated_title_subject_also_matches_its_bare_name():
+    subject, names = validate_subject([{'subject': 'Prince (musician)', 'aliases': []}],
+                                      'Prince (musician) - Wikipedia', 'Prince released Purple Rain in 1984.')
+    assert subject == 'Prince (musician)' and 'Prince' in names
+    assert mentions('Prince played 96 shows on the Musicology tour.', names)
