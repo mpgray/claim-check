@@ -18,9 +18,13 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
 - The article's own site is never a source (`pipeline.site`).
 - Source tier comes from the host, never from the model.
 - Summary numbers are counts.
+- An inflation conversion is computed by code from BLS CPI data
+  (`app/inflation.py`), never judged by the model. It contradicts a claim only
+  with an explicit base year, and a correct one never upgrades a claim alone.
 - A snapshot highlights only text code already verified, matched with the
   same normalisation as `claims.norm`. A miss is shown as a miss; an image of
-  a page the fetch did not see (bot check, consent wall) is never kept.
+  a page the fetch did not see (bot check, consent wall) is never kept, and
+  text the page hides (paywall fold) is reported as hidden, not captured.
 
 Do not loosen `verify.check` to raise the supported rate. A low supported rate
 with honest receipts is the product working.

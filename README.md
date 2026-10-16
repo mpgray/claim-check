@@ -20,10 +20,14 @@ model: extract claims, 30k-char chunks (≤200k)    app/prompts.py, app/llm.py
 code: span must be verbatim; value in span;       app/claims.py
       figures no claim covers → "not checked"
       │
-claim's own citation, then search, then other     app/search.py, app/fetch.py
-      cited links ─► fetch sources (HTML or PDF)
+claim's own citations (Wikipedia footnotes are   app/search.py, app/fetch.py
+      followed to the reference list), then search
+      results official-first, then other cited links
+      ─► fetch sources (HTML or PDF)
       │  the article's own site is never a source
       │  each source tiered official/reference/open by host
+code: inflation conversions computed from BLS     app/inflation.py
+      CPI-U ("$61 ... equivalent to $104 in 2025")
 model: judge one claim against passages + dates   app/pipeline.py
       │
 code: quote on the cited page? figure in quote?   app/verify.py
@@ -43,19 +47,48 @@ Model output never counts until code has checked it. The summary is counting.
 
 After judging, a headless Chromium (Playwright) opens the article and paints
 every claim in its verdict colour, then opens each receipt's source and paints
-the quote. Each gets a full-page PNG plus a crop per claim, stored in
-`data/snapshots/<report id>/` and shown on the report. The live
-`#:~:text=` link can break when a page changes; the image does not.
+the quote. The whole page is saved as stacked JPEG tiles plus a crop per
+claim, in `data/snapshots/<report id>/`. Clicking a claim's thumbnail opens an
+in-page viewer at that claim, with numbered markers on every highlight,
+prev/next (or arrow keys) and an actual-size toggle. The live `#:~:text=` link
+can break when a page changes; the snapshot does not.
 
 - Highlights use the CSS Custom Highlight API, so the page's markup and
-  layout are untouched. Matching mirrors `claims.norm`. Text the rendered page
-  does not contain is reported as not found, never approximated.
+  layout are untouched. Matching mirrors `claims.norm`.
+- A highlight counts only if the browser shows that text at that spot
+  (`elementFromPoint`). Text in the DOM but under a paywall fold or overlay is
+  reported as hidden; text the rendered page lacks is reported as not found.
 - If the browser is served a different page than the fetch got (a bot check,
   a consent wall), no image is kept and the report says so.
 - Every browser request goes through the same public-address check as the
   fetch. Fixed overlays are hidden before capture; nothing is clicked.
-- Pages taller than 16,000 px are captured around the highlights.
 - PDF sources are quoted from their text layer; they get no image.
+
+### Computed checks
+
+An inflation conversion is arithmetic, not a fact a source restates, so code
+computes it from the BLS CPI-U annual averages (FRED as fallback; cached in
+`data/cpi_us.json` for a week). The base year is the one the claim states,
+else the nearest earlier year in the text, and the report says which. A wrong
+conversion contradicts the claim only when the base year is explicit; a
+correct one never upgrades a claim by itself.
+
+### Source tiers
+
+`official` and `reference` come from built-in host rules (government
+suffixes worldwide, intergovernmental bodies, bodies of record; universities,
+journals, papers of record, fact-checkers) plus `CC_OFFICIAL_DOMAINS` /
+`CC_REFERENCE_DOMAINS`. `CC_DEFAULT_TIERS=0` keeps only yours. Archived copies
+(`web.archive.org`) tier as the site they archive. `/sources` lists the rules.
+
+### Report extras
+
+- **Citations:** what each claim's own cited links showed when read.
+- **Compare:** verdicts that changed since the previous check of the article.
+- **Feedback:** thumbs up/down per verdict; `/api/feedback` exports them with
+  the claim, reason and receipt for prompt tuning.
+- **PDF:** `/r/<id>/report.pdf`. **Share:** Open Graph tags with the counts.
+- **Bookmarklet** on the home page.
 
 Ported ideas from articles-ai: passage extraction and focused excerpts
 (`research.py`), the quote-held-to-the-page rule (`supersession._verify`),
@@ -117,8 +150,9 @@ Known gaps:
   the checked address before exposing this publicly. No rate limiting either.
 - Sites that block headless browsers (Cloudflare) get no snapshot; the
   report says so.
-- Tiering only knows the domains in `CC_OFFICIAL_DOMAINS` /
-  `CC_REFERENCE_DOMAINS`; a city's own `.gov` site is "open" unless listed.
+- Claim extraction varies run to run (the model picks different claims).
+- Paywalled sources are quoted from the server-rendered text; their
+  snapshot reports the quote as hidden.
 - Jobs run in-process threads; a restart marks running reports as
   interrupted.
 

@@ -21,7 +21,7 @@ from app.config import Config
 from app.fetch import FetchError, Page, article_passages, fetch_page, focused_excerpt
 from app.llm import LLM, LLMError
 from app.prompts import EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM, JUDGE_USER
-from app.search import TIER_RANK, Search, tier
+from app.search import TIER_RANK, Search, tier, unarchive
 
 CHUNK_CHARS = 30_000       # one extraction call
 MAX_ARTICLE_CHARS = 200_000  # beyond this the article is not read, and the report says so
@@ -51,8 +51,9 @@ class Report:
 
 
 def site(url: str) -> str:
-    """Host without `www.`/mobile prefixes: the unit for "the article's own site"."""
-    host = (urlsplit(url).hostname or '').lower()
+    """Host without `www.`/mobile prefixes: the unit for "the article's own site".
+    An archived copy counts as the site it archives."""
+    host = (urlsplit(unarchive(url)).hostname or '').lower()
     for prefix in ('www.', 'm.', 'mobile.', 'amp.'):
         if host.startswith(prefix):
             host = host[len(prefix):]
@@ -310,9 +311,10 @@ class Checker:
     def _candidate_urls(self, claim: claims_mod.Claim, cited: list[str],
                         article_url: str) -> list[str]:
         own_cites = self._own_citations(claim, cited)
-        # The claim's own citation is read first; search leads come next, so
-        # the citation is checked rather than trusted.
-        urls: list[str] = own_cites[:1]
+        # The claim's own citations are read first (an original and its
+        # archived copy are alternates); search leads come next, so the
+        # citation is checked rather than trusted.
+        urls: list[str] = own_cites[:4]
         if claim.query:
             try:
                 found = [r['url'] for r in self.search.search(claim.query)]
@@ -325,7 +327,7 @@ class Checker:
                 self.search_error = f'Search failed: {exc}'[:300]
         # The article's own citations are leads too, but never the only lead
         # when search is available: a citation is what is being checked.
-        urls += own_cites[1:] + cited
+        urls += own_cites[4:] + cited
         own = site(article_url)
         seen, out = set(), []
         for u in urls:
@@ -382,12 +384,19 @@ class Checker:
         pages: dict[str, str] = {}
         dates: dict[str, str] = {}
         sources = []
+        own = set(self._own_citations(claim, report.cited_links))
+        own_read, read_keys = 0, set()
         for url in self._candidate_urls(claim, report.cited_links, report.url):
             if len(sources) >= self.cfg.max_sources_per_claim:
                 break
+            key = unarchive(url).split('://', 1)[-1].rstrip('/')
+            if key in read_keys or (url in own and own_read >= 2):
+                continue        # the archived twin of a page already read, or enough citations
             page = self._page(url)
             if not page or site(page.url) == site(report.url):
                 continue
+            read_keys.add(key)
+            own_read += url in own
             pages[page.url] = page.text
             dates[page.url] = page.date
             sources.append({'url': page.url, 'requested': url, 'title': page.title, 'date': page.date,

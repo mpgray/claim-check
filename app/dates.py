@@ -65,7 +65,7 @@ def page_date(html: str) -> str:
     Modified beats published: the question is how current the page's figure
     is, and a page updated last week is current as of last week.
     """
-    head = html[:2_000_000]
+    head = html            # Wikipedia's JSON-LD sits at the very end; fetch caps size
     metas: dict[str, str] = {}
     for m in _META_RE.finditer(head):
         a = _attrs(m[0])

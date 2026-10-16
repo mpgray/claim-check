@@ -20,10 +20,10 @@
     <span id="rdate" {% if not r.date %}hidden{% endif %}>Article dated <span>{{ r.date }}</span></span>
     <span>Checked <time datetime="{{ meta.created_at | int }}" data-ts="{{ meta.created_at }}"></time></span>
     <button type="button" class="linkish" data-copy="{{ url_for('report', rid=rid, _external=True) }}">Copy link</button>
-    <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Re-check</a>
-    <a href="{{ url_for('api_report', rid=rid) }}">JSON</a>
+    <a href="{{ url_for('check', url=meta.url, fresh=1) }}" class="noprint">Re-check</a>
+    <a href="{{ url_for('api_report', rid=rid) }}" class="noprint">JSON</a>
     {% if r.status == 'done' %}<a href="{{ url_for('report_pdf', rid=rid) }}" class="noprint">Download PDF</a>{% endif %}
-    {% if previous %}<a href="{{ url_for('report_compare', rid=rid, old=previous.id) }}">Compare with the check from <time data-ts="{{ previous.created_at }}"></time></a>{% endif %}
+    {% if previous %}<a class="noprint" href="{{ url_for('report_compare', rid=rid, old=previous.id) }}">Compare with the check from <time data-ts="{{ previous.created_at }}"></time></a>{% endif %}
   </p>
   {% if cached %}<p class="note">This article was checked recently, so this is that report. <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Check it again</a>.</p>{% endif %}
   <p id="progress" class="progress" aria-live="polite" {% if r.status != 'running' %}hidden{% endif %}></p>

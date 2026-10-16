@@ -133,8 +133,21 @@ RECORD_START = OFFICIAL_DOMAINS.index('riaa.com')
 TIER_RANK = {'official': 0, 'reference': 1, 'open': 2}
 
 
+_ARCHIVE = re.compile(r'^https?://(?:web\.)?archive\.org/web/[0-9a-z_*]+/(?P<url>.+)$', re.I)
+
+
+def unarchive(url: str) -> str:
+    """The original URL behind a Wayback Machine copy, else the URL itself.
+    An archived BBC page is a BBC page for tiering and de-duplication."""
+    m = _ARCHIVE.match(url or '')
+    if not m:
+        return url
+    inner = m.group('url')
+    return inner if inner.startswith(('http://', 'https://')) else 'http://' + inner
+
+
 def tier(url: str, official: list[str], reference: list[str], defaults: bool = True) -> str:
-    host = (urlsplit(url).hostname or '').lower().strip('.')
+    host = (urlsplit(unarchive(url)).hostname or '').lower().strip('.')
     if domain_matches(host, official) or (defaults and (
             domain_matches(host, OFFICIAL_DOMAINS) or any(p.search(host) for p in OFFICIAL_SUFFIXES))):
         return 'official'

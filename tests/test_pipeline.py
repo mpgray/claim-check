@@ -217,3 +217,12 @@ def test_a_footnote_cites_the_sentence_it_follows_not_the_whole_paragraph():
     cited = ['https://a.example/1', 'https://b.example/2']
     second = Claim(id=2, span='Second claim about tickets is here.', kind='other')
     assert checker._own_citations(second, cited) == ['https://b.example/2']
+
+
+def test_archived_copies_count_as_the_site_they_archive():
+    from app.pipeline import site
+    from app.search import tier, unarchive
+    url = 'https://web.archive.org/web/20220427161655/http://news.bbc.co.uk/1/hi/entertainment/4251227.stm'
+    assert unarchive(url) == 'http://news.bbc.co.uk/1/hi/entertainment/4251227.stm'
+    assert tier(url, [], []) == 'reference'
+    assert site('https://web.archive.org/web/2020/https://blog.example/wage') == site(ARTICLE_URL)
