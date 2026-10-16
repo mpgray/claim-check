@@ -21,7 +21,7 @@ from app.config import Config
 from app.fetch import FetchError, Page, article_passages, fetch_page, focused_excerpt
 from app.llm import LLM, LLMError
 from app.prompts import EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM, JUDGE_USER
-from app.search import Search, tier
+from app.search import TIER_RANK, Search, tier
 
 CHUNK_CHARS = 30_000       # one extraction call
 MAX_ARTICLE_CHARS = 200_000  # beyond this the article is not read, and the report says so
@@ -256,6 +256,10 @@ class Checker:
         return [u for u, ctx in self._link_context
                 if u in cited and span and span[:120] in claims_mod.norm(ctx)]
 
+    def _tier(self, url: str) -> str:
+        return tier(url, self.cfg.official_domains, self.cfg.reference_domains,
+                    self.cfg.default_tiers)
+
     def _candidate_urls(self, claim: claims_mod.Claim, cited: list[str],
                         article_url: str) -> list[str]:
         own_cites = self._own_citations(claim, cited)
@@ -264,7 +268,9 @@ class Checker:
         urls: list[str] = own_cites[:1]
         if claim.query:
             try:
-                urls += [r['url'] for r in self.search.search(claim.query)]
+                found = [r['url'] for r in self.search.search(claim.query)]
+                # Sources of record are read first; the source limit is small.
+                urls += sorted(found, key=lambda u: TIER_RANK[self._tier(u)])
             except Exception as exc:
                 # A search outage leaves the cited-link path, but never
                 # silently: the report says search was down, or a page of
@@ -337,8 +343,7 @@ class Checker:
             sources.append({'url': page.url, 'title': page.title, 'date': page.date,
                             'kind': page.kind,
                             'text': focused_excerpt(page.source_passages, claim.span),
-                            'tier': tier(page.url, self.cfg.official_domains,
-                                         self.cfg.reference_domains)})
+                            'tier': self._tier(page.url)})
         listed = [{k: s[k] for k in ('url', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
             return 'unverified', 'No readable source was found.', None, listed

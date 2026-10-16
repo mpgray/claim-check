@@ -161,3 +161,26 @@ def test_snapshots_run_after_judging_and_a_failure_never_sinks_the_report():
     report = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch, snapshotter=Snap()).run(ARTICLE_URL)
     assert 'pending' not in seen['verdicts']
     assert report.status == 'done' and 'chromium missing' in report.snapshot['error']
+
+
+def test_default_tiers_cover_governments_universities_and_papers_of_record():
+    from app.search import tier
+    assert tier('https://www.seattle.gov/x', [], []) == 'official'
+    assert tier('https://www.gov.uk/x', [], []) == 'official'
+    assert tier('https://www.legislation.gov.uk/x', [], []) == 'official'
+    assert tier('https://who.int/news', [], []) == 'official'
+    assert tier('https://www.bbc.co.uk/news', [], []) == 'reference'
+    assert tier('https://history.stanford.edu/a', [], []) == 'reference'
+    assert tier('https://goldiesparade.co.uk/a', [], []) == 'open'
+    assert tier('https://gov.example.com/a', [], []) == 'open'
+    assert tier('https://www.bbc.co.uk/news', [], [], defaults=False) == 'open'
+
+
+def test_sources_of_record_are_read_first():
+    class Mixed:
+        def search(self, q):
+            return [{'url': 'https://blog.other/x'}, {'url': SOURCE_URL}]
+    checker = Checker(Config(max_sources_per_claim=1), FakeLLM(), Mixed(), fetch=fake_fetch)
+    report = checker.run(ARTICLE_URL)
+    wage = next(c for c in report.claims if '7.25' in c.span)
+    assert wage.sources[0]['url'] == SOURCE_URL and wage.sources[0]['tier'] == 'official'

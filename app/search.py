@@ -5,6 +5,7 @@ Tiering is articles-ai's and game-db's idea: every source records whether it is
 secondary source) or `open` (anything else). It is measurement, not advice —
 the tier is decided by the host that answered, never by the model.
 """
+import re
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -92,10 +93,50 @@ def domain_matches(host: str, domains: list[str]) -> bool:
     return any(host == d or host.endswith('.' + d) for d in domains)
 
 
-def tier(url: str, official: list[str], reference: list[str]) -> str:
-    host = urlsplit(url).hostname or ''
-    if domain_matches(host, official):
+# Built-in tiers. Still decided by the host alone, never by the model; the
+# CC_OFFICIAL_DOMAINS / CC_REFERENCE_DOMAINS lists add to these, and
+# CC_DEFAULT_TIERS=0 turns them off.
+#
+# official: writes the rule or publishes the figure. Governments everywhere
+# (by suffix), intergovernmental bodies, and the bodies of record for figures
+# articles often cite (charts, certifications, awards, central statistics).
+OFFICIAL_SUFFIXES = [re.compile(p) for p in (
+    r'\.gov$', r'\.mil$', r'\.int$', r'\.fed\.us$', r'\.(?:gov|gob|gouv|govt|go|gv)\.[a-z]{2}$',
+    r'(?:^|\.)gc\.ca$', r'(?:^|\.)europa\.eu$', r'(?:^|\.)admin\.ch$', r'(?:^|\.)bund\.de$',
+    r'(?:^|\.)gouv\.fr$', r'(?:^|\.)overheid\.nl$', r'(?:^|\.)parliament\.uk$')]
+OFFICIAL_DOMAINS = [
+    'un.org', 'worldbank.org', 'imf.org', 'oecd.org', 'wto.org', 'bis.org', 'ecb.europa.eu',
+    'federalreserve.gov', 'stlouisfed.org', 'minneapolisfed.org', 'newyorkfed.org',
+    'riaa.com', 'bpi.co.uk', 'ifpi.org', 'officialcharts.com', 'billboard.com', 'grammy.com',
+    'oscars.org', 'nobelprize.org', 'olympics.com', 'fifa.com', 'sec.report',
+]
+# reference: curated secondary sources with editorial standards: encyclopedias,
+# universities and journals, wire services and papers of record, fact-checkers,
+# and established statistics publishers.
+REFERENCE_SUFFIXES = [re.compile(p) for p in (r'\.edu$', r'\.(?:ac|edu)\.[a-z]{2}$')]
+REFERENCE_DOMAINS = [
+    'wikipedia.org', 'britannica.com', 'doi.org', 'jstor.org', 'nature.com', 'science.org',
+    'sciencedirect.com', 'springer.com', 'wiley.com', 'nejm.org', 'thelancet.com', 'bmj.com',
+    'pnas.org', 'cell.com', 'arxiv.org', 'ssrn.com', 'nber.org', 'brookings.edu', 'rand.org',
+    'pewresearch.org', 'ourworldindata.org', 'cbo.gov', 'epi.org', 'urban.org', 'kff.org',
+    'reuters.com', 'apnews.com', 'afp.com', 'bbc.co.uk', 'bbc.com', 'npr.org', 'pbs.org',
+    'nytimes.com', 'washingtonpost.com', 'wsj.com', 'ft.com', 'economist.com', 'bloomberg.com',
+    'theguardian.com', 'latimes.com', 'usatoday.com', 'cbsnews.com', 'nbcnews.com', 'abcnews.go.com',
+    'cnn.com', 'cnbc.com', 'politico.com', 'axios.com', 'theatlantic.com', 'newyorker.com',
+    'time.com', 'forbes.com', 'fortune.com', 'propublica.org', 'theconversation.com',
+    'snopes.com', 'politifact.com', 'factcheck.org', 'fullfact.org',
+    'rollingstone.com', 'variety.com', 'hollywoodreporter.com', 'pollstar.com', 'allmusic.com',
+    'boxofficemojo.com', 'the-numbers.com', 'espn.com',
+]
+TIER_RANK = {'official': 0, 'reference': 1, 'open': 2}
+
+
+def tier(url: str, official: list[str], reference: list[str], defaults: bool = True) -> str:
+    host = (urlsplit(url).hostname or '').lower().strip('.')
+    if domain_matches(host, official) or (defaults and (
+            domain_matches(host, OFFICIAL_DOMAINS) or any(p.search(host) for p in OFFICIAL_SUFFIXES))):
         return 'official'
-    if domain_matches(host, reference):
+    if domain_matches(host, reference) or (defaults and (
+            domain_matches(host, REFERENCE_DOMAINS) or any(p.search(host) for p in REFERENCE_SUFFIXES))):
         return 'reference'
     return 'open'

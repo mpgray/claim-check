@@ -55,8 +55,10 @@ class Config:
     # Tiering, as in articles-ai: who writes the rule beats who writes about it.
     official_domains: list[str] = field(default_factory=lambda: _list('CC_OFFICIAL_DOMAINS'))
     reference_domains: list[str] = field(default_factory=lambda: _list('CC_REFERENCE_DOMAINS'))
+    # Built-in tier lists (app.search) on top of the two above; CC_DEFAULT_TIERS=0 for only yours.
+    default_tiers: bool = field(default_factory=lambda: os.environ.get('CC_DEFAULT_TIERS', '1') != '0')
     max_claims: int = field(default_factory=lambda: int(os.environ.get('CC_MAX_CLAIMS', '15')))
-    max_sources_per_claim: int = 3
+    max_sources_per_claim: int = field(default_factory=lambda: int(os.environ.get('CC_MAX_SOURCES', '3')))
     workers: int = 6
     # Reports (SQLite) and snapshots (PNG) live here.
     data_dir: str = field(default_factory=lambda: os.environ.get('CC_DATA_DIR', 'data'))
