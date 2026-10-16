@@ -2,59 +2,21 @@
 {% block title %}{{ r.title or r.url }} · Claim Check{% endblock %}
 {% block main %}
 <p class="back"><a href="/">← Check another</a></p>
-{% if r.error %}
-  <h1>Could not check this page</h1>
-  <p class="error" role="alert">{{ r.error }}</p>
-  <p><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>
-{% else %}
-<h1>{{ r.title or 'Untitled page' }}</h1>
-<p class="src"><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>
-{% if r.search_error %}<p class="error" role="alert">{{ r.search_error }} Claims were checked only against the links the article cites.</p>{% endif %}
-
-<section class="summary" aria-label="Summary">
-  {% for v in ['supported', 'contradicted', 'outdated', 'unverified', 'opinion'] %}
-    <div class="stat v-{{ v }}"><span class="n">{{ r.counts.get(v, 0) }}</span>
-      <span class="l">{{ v }}</span></div>
-  {% endfor %}
-</section>
-{% set total = r.tiers.values() | sum %}
-{% if total %}
-<section class="tiers" aria-label="Where the receipts came from">
-  <div class="bar">
-    {% for t in ['official', 'reference', 'open'] %}{% if r.tiers[t] %}
-      <span class="seg t-{{ t }}" style="flex: {{ r.tiers[t] }}">{{ t }} {{ r.tiers[t] }}</span>
-    {% endif %}{% endfor %}
-  </div>
-</section>
-{% endif %}
-
-<ol class="claims">
-{% for c in r.claims %}
-  <li class="claim v-{{ c.verdict }}">
-    <div class="head"><span class="badge">{{ c.verdict }}</span><span class="kind">{{ c.kind }}</span></div>
-    <blockquote class="span">{{ c.span }}</blockquote>
-    {% if c.reason %}<p class="reason">{{ c.reason }}</p>{% endif %}
-    {% if c.receipt %}
-      <p class="receipt">Receipt ({{ c.receipt.tier }}):
-        <a href="{{ c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>
-        {% if c.receipt.as_of %}<span class="asof">changed {{ c.receipt.as_of }}</span>{% endif %}</p>
-    {% elif c.sources %}
-      <details><summary>Sources read ({{ c.sources | length }})</summary>
-        <ul>{% for s in c.sources %}<li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.title or s.url }}</a> · {{ s.tier }}</li>{% endfor %}</ul>
-      </details>
-    {% endif %}
-  </li>
-{% else %}
-  <li class="empty">No checkable claims were found on this page.</li>
-{% endfor %}
-</ol>
-
-{% if r.missed %}
-<section class="missed">
-  <h2>Figures not checked</h2>
-  <p>These numbers and dates appear in the article but no checked claim covers them.</p>
-  <p class="chips">{% for m in r.missed[:30] %}<span>{{ m }}</span>{% endfor %}</p>
-</section>
-{% endif %}
-{% endif %}
+<header class="rhead">
+  <h1 id="rtitle">{{ r.title or ('Reading the article…' if r.status == 'running' else 'Untitled page') }}</h1>
+  <p class="src"><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>
+  <p class="meta">
+    {% if r.date %}<span>Article dated {{ r.date }}</span>{% endif %}
+    <span>Checked <time datetime="{{ meta.created_at | int }}" data-ts="{{ meta.created_at }}"></time></span>
+    <button type="button" class="linkish" data-copy="{{ url_for('report', rid=rid, _external=True) }}">Copy link</button>
+    <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Re-check</a>
+    <a href="{{ url_for('api_report', rid=rid) }}">JSON</a>
+  </p>
+  {% if cached %}<p class="note">This article was checked recently, so this is that report. <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Check it again</a>.</p>{% endif %}
+  <p id="progress" class="progress" aria-live="polite" {% if r.status != 'running' %}hidden{% endif %}></p>
+</header>
+<div id="report-body" data-id="{{ rid }}" data-status="{{ r.status }}">
+{% include '_body.html' %}
+</div>
+<script src="{{ url_for('static', filename='report.js') }}" defer></script>
 {% endblock %}

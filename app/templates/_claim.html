@@ -1,0 +1,39 @@
+{% set snap = c.snapshot or {} %}
+<li class="claim v-{{ c.verdict }}" id="claim-{{ c.id }}" data-verdict="{{ c.verdict }}">
+  <div class="head">
+    <span class="badge">{{ 'checking…' if c.verdict == 'pending' else c.verdict }}</span>
+    <span class="kind">{{ c.kind }}{% if c.value %} · {{ c.value }}{% endif %}</span>
+    <a class="anchor" href="#claim-{{ c.id }}" aria-label="Link to claim {{ c.id }}">#{{ c.id }}</a>
+  </div>
+  <blockquote class="span">{{ c.span }}</blockquote>
+  {% if snap.article_crop %}
+    <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.article_full or r.snapshot.article_full) }}" target="_blank" title="In the article">
+      <img src="{{ url_for('snap', rid=rid, name=snap.article_crop) }}" alt="The claim highlighted in the article" loading="lazy"></a>
+  {% elif snap.article_found is sameas false %}
+    <p class="note">Not found in the rendered article page, so it is not highlighted in the snapshot.</p>
+  {% endif %}
+  {% if c.reason %}<p class="reason">{{ c.reason }}</p>{% endif %}
+  {% if c.receipt %}
+    <div class="receipt">
+      <p>Receipt <span class="rmeta">{{ c.receipt.tier }}{% if c.receipt.date %} · dated {{ c.receipt.date }}{% endif %}{% if c.receipt.kind == 'pdf' %} · PDF{% endif %}</span>
+        <a href="{{ c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>
+        {% if c.receipt.as_of %}<span class="asof">changed {{ c.receipt.as_of }}</span>{% endif %}</p>
+      {% if snap.source_crop %}
+        <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.source_full) }}" target="_blank" title="The source as captured">
+          <img src="{{ url_for('snap', rid=rid, name=snap.source_crop) }}" alt="The quote highlighted on the source page" loading="lazy"></a>
+        <p class="note">Captured {{ snap.captured_at or r.snapshot.captured_at }}. The live link may change; this image will not.</p>
+      {% elif c.receipt.kind == 'pdf' %}
+        <p class="note">PDF source: the quote was verified in its text; no image is captured.</p>
+      {% elif snap.source_found is sameas false %}
+        <p class="note">The quote is in the page's text but was not found in the rendered page (it may be added by scripts), so the image has no highlight.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+  {% if c.sources and (not c.receipt or c.sources | length > 1) %}
+    <details><summary>Sources read ({{ c.sources | length }})</summary>
+      <ul>{% for s in c.sources %}<li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.title or s.url }}</a>
+        · {{ s.tier }}{% if s.date %} · {{ s.date }}{% endif %}{% if s.kind == 'pdf' %} · PDF{% endif %}</li>{% endfor %}</ul>
+    </details>
+  {% endif %}
+  {% if c.dropped_self %}<p class="note">{{ c.dropped_self }} search result{{ 's' if c.dropped_self > 1 }} came from the article's own site and {{ 'were' if c.dropped_self > 1 else 'was' }} not used.</p>{% endif %}
+</li>

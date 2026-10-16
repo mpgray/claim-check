@@ -3,7 +3,8 @@
 <section class="hero">
   <h1>Check what an article can back up</h1>
   <p>Paste a link. Each factual claim is checked against sources, and every
-     verdict links to the exact sentence that decided it.</p>
+     verdict links to the exact sentence that decided it, with a snapshot of
+     the page as it read when it was checked.</p>
   <form action="/check" method="get" class="urlform">
     <label for="url">Article URL</label>
     <div class="row">
@@ -13,7 +14,20 @@
   </form>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if fake %}<p class="note">Running without a model: the offline checker
-     matches figures literally. Set <code>CC_LLM_BASE_URL</code> and
-     <code>CC_LLM_MODEL</code> for real checks.</p>{% endif %}
+     matches figures literally. Set <code>CC_OPENROUTER_API_KEY</code> (or
+     <code>CC_LLM_BASE_URL</code> and <code>CC_LLM_MODEL</code>) for real checks.</p>{% endif %}
 </section>
+{% if recent %}
+<section class="recent">
+  <h2>Recent checks</h2>
+  <ul>
+  {% for x in recent %}
+    <li><a href="{{ url_for('report', rid=x.id) }}">{{ x.title or x.final_url or x.url }}</a>
+      <span class="st st-{{ x.status }}">{{ x.status }}</span>
+      <time data-ts="{{ x.created_at }}"></time></li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+<script src="{{ url_for('static', filename='report.js') }}" defer></script>
 {% endblock %}

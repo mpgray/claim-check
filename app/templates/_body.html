@@ -1,0 +1,66 @@
+{% if r.error %}
+  <h2>Could not check this page</h2>
+  <p class="error" role="alert">{{ r.error }}</p>
+{% endif %}
+{% if r.search_error %}<p class="error" role="alert">{{ r.search_error }} Claims were checked only against the links the article cites.</p>{% endif %}
+{% if r.truncated_chars %}<p class="notice">The article is longer than Claim Check reads; the last {{ '{:,}'.format(r.truncated_chars) }} characters were not checked.</p>{% endif %}
+{% if r.proposed and r.proposed > r.claims | length %}
+  {% set over = r.rejected | selectattr('rejected', 'equalto', 'over the claim limit') | list %}
+  {% set bad = r.rejected | rejectattr('rejected', 'equalto', 'over the claim limit') | list %}
+  <details class="notice"><summary>The extractor proposed {{ r.proposed }} claims; {{ r.claims | length }} were checked.</summary>
+    <ul>
+      {% if over %}<li>{{ over | length }} over the claim limit (CC_MAX_CLAIMS).</li>{% endif %}
+      {% for x in bad %}<li>Rejected, {{ x.rejected }}: “{{ (x.span or '')[:160] }}”</li>{% endfor %}
+    </ul>
+  </details>
+{% endif %}
+{% if r.extract_errors %}<p class="notice">Part of the article could not be read by the model: {{ r.extract_errors[0] }}</p>{% endif %}
+
+{% if r.claims or r.status != 'running' %}
+<section class="summary" aria-label="Summary">
+  {% for v in ['supported', 'contradicted', 'outdated', 'unverified', 'opinion'] %}
+    <div class="stat v-{{ v }}"><span class="n" data-count="{{ v }}">{{ r.counts.get(v, 0) }}</span>
+      <span class="l">{{ v }}</span></div>
+  {% endfor %}
+</section>
+{% endif %}
+{% set total = r.tiers.values() | sum %}
+{% if total %}
+<section class="tiers" aria-label="Where the receipts came from">
+  <div class="bar">
+    {% for t in ['official', 'reference', 'open'] %}{% if r.tiers[t] %}
+      <span class="seg t-{{ t }}" style="flex: {{ r.tiers[t] }}">{{ t }} {{ r.tiers[t] }}</span>
+    {% endif %}{% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if r.snapshot and r.snapshot.article_full %}
+  <p class="snapline">📷 <a href="{{ url_for('snap', rid=rid, name=r.snapshot.article_full) }}" target="_blank">Snapshot of the article</a>
+    with every claim highlighted, captured {{ r.snapshot.captured_at }}.</p>
+{% elif r.snapshot and r.snapshot.error %}
+  <p class="note">{{ r.snapshot.error }}</p>
+{% elif r.status == 'running' and r.claims %}
+  <p class="note" id="snapnote" hidden>Capturing snapshots…</p>
+{% endif %}
+
+<ol class="claims">
+{% for c in r.claims %}
+  {% include '_claim.html' %}
+{% else %}
+  {% if r.status == 'running' %}
+  <li class="empty pending-pulse">{{ 'Finding the claims…' if r.title else 'Fetching the article…' }}</li>
+  {% elif not r.error %}
+  <li class="empty">No checkable claims were found on this page.</li>
+  {% endif %}
+{% endfor %}
+</ol>
+
+{% if r.missed %}
+<section class="missed">
+  <h2>Figures not checked</h2>
+  <p>These numbers and dates appear in the article but no checked claim covers them.</p>
+  <p class="chips">{% for m in r.missed[:40] %}<span>{{ m }}</span>{% endfor %}
+    {% if r.missed | length > 40 %}<span class="more">+{{ r.missed | length - 40 }} more</span>{% endif %}</p>
+</section>
+{% endif %}

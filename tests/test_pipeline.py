@@ -62,15 +62,50 @@ def test_unreadable_article_is_an_error_not_an_empty_report(checker):
     assert report.error and not report.claims
 
 
-def test_routes_render(checker):
-    app = create_app(checker_factory=lambda: checker)
-    client = app.test_client()
+def _app(checker, tmp_path, **kw):
+    from app.store import Store
+    cfg = Config(data_dir=str(tmp_path), snapshots=False)
+    return create_app(checker_factory=lambda: checker, store=Store(tmp_path / 'db.sqlite3'),
+                      sync_jobs=True, cfg=cfg, **kw)
+
+
+def test_routes_render(checker, tmp_path):
+    client = _app(checker, tmp_path).test_client()
     assert client.get('/').status_code == 200
     assert client.get('/check').status_code == 400
-    page = client.get('/check', query_string={'url': ARTICLE_URL})
+    started = client.get('/check', query_string={'url': ARTICLE_URL})
+    assert started.status_code == 303 and '/r/' in started.location
+    page = client.get(started.location)
     assert page.status_code == 200 and b'Receipt' in page.data
-    data = client.get('/api/check', query_string={'url': ARTICLE_URL}).get_json()
-    assert data['counts']['supported'] == 1
+    rid = started.location.rsplit('/', 1)[-1]
+    data = client.get(f'/api/r/{rid}').get_json()
+    assert data['counts']['supported'] == 1 and data['status'] == 'done'
+    assert client.get(f'/r/{rid}/claim/1').status_code == 200
+    assert b'Receipt' in client.get(f'/r/{rid}/body').data
+    assert client.get('/api/check', query_string={'url': ARTICLE_URL}).get_json()['counts']['supported'] == 1
+
+
+def test_recent_check_is_reused_and_fresh_forces_a_new_one(checker, tmp_path):
+    client = _app(checker, tmp_path).test_client()
+    first = client.get('/check', query_string={'url': ARTICLE_URL}).location
+    again = client.get('/check', query_string={'url': ARTICLE_URL}).location
+    assert first.split('?')[0] == again.split('?')[0] and 'cached=1' in again
+    fresh = client.get('/check', query_string={'url': ARTICLE_URL, 'fresh': 1}).location
+    assert fresh.split('?')[0] != first.split('?')[0]
+
+
+def test_event_stream_replays_and_ends(checker, tmp_path):
+    client = _app(checker, tmp_path).test_client()
+    rid = client.get('/check', query_string={'url': ARTICLE_URL}).location.rsplit('/', 1)[-1]
+    text = client.get(f'/r/{rid}/events').get_data(as_text=True)
+    assert 'event: fetched' in text and 'event: claim' in text and text.rstrip().endswith('}')
+    assert 'event: done' in text
+
+
+def test_snapshot_names_are_whitelisted(checker, tmp_path):
+    client = _app(checker, tmp_path).test_client()
+    assert client.get('/r/abc/snap/..%2F..%2Fdb.sqlite3').status_code == 404
+    assert client.get('/r/abc/snap/article.png').status_code == 404
 
 
 def test_the_article_is_never_its_own_receipt():

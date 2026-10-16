@@ -58,3 +58,9 @@ class Config:
     max_claims: int = field(default_factory=lambda: int(os.environ.get('CC_MAX_CLAIMS', '15')))
     max_sources_per_claim: int = 3
     workers: int = 6
+    # Reports (SQLite) and snapshots (PNG) live here.
+    data_dir: str = field(default_factory=lambda: os.environ.get('CC_DATA_DIR', 'data'))
+    # A finished report for the same URL younger than this is reused.
+    cache_seconds: int = field(default_factory=lambda: int(os.environ.get('CC_CACHE_SECONDS', '3600')))
+    # Page snapshots need Playwright's Chromium; off with CC_SNAPSHOTS=0.
+    snapshots: bool = field(default_factory=lambda: os.environ.get('CC_SNAPSHOTS', '1') != '0')

@@ -107,6 +107,9 @@ class Checker:
         self.snapshotter = snapshotter
         self._page_cache: dict[str, Page | None] = {}
         self._cache_lock = threading.Lock()
+        # Held while a claim's result is written and while an event handler
+        # reads the report, so a saved report never has half a verdict.
+        self.lock = threading.RLock()
         self._link_context: list[tuple[str, str]] = []
         self.search_error = ''
 
@@ -130,7 +133,11 @@ class Checker:
             return self._page_cache.get(url)
 
     def run(self, url: str, on_event=None) -> Report:
-        emit = on_event or _noop
+        handler = on_event or _noop
+
+        def emit(kind, report, data):
+            with self.lock:
+                handler(kind, report, data)
         report = Report(url=url)
         try:
             page = self.fetch(url)
@@ -168,8 +175,10 @@ class Checker:
                 try:
                     fut.result()
                 except Exception as exc:  # a bug in one claim never sinks the report
-                    claim.verdict, claim.reason = 'unverified', f'Checking failed: {exc}'[:300]
-                summarize(report)
+                    with self.lock:
+                        claim.verdict, claim.reason = 'unverified', f'Checking failed: {exc}'[:300]
+                with self.lock:
+                    summarize(report)
                 emit('claim', report, {'id': claim.id})
         report.search_error = self.search_error
         summarize(report)
@@ -250,9 +259,15 @@ class Checker:
         return out
 
     def _judge(self, claim: claims_mod.Claim, report: Report) -> None:
+        verdict, reason, receipt, sources = self._decide(claim, report)
+        with self.lock:
+            claim.sources, claim.receipt = sources, receipt
+            claim.verdict, claim.reason = verdict, reason
+
+    def _decide(self, claim: claims_mod.Claim, report: Report):
+        """(verdict, reason, receipt, sources) for one claim; writes nothing."""
         if claim.kind == 'opinion':
-            claim.verdict, claim.reason = 'opinion', 'Judgement or advice; not checked.'
-            return
+            return 'opinion', 'Judgement or advice; not checked.', None, []
         pages: dict[str, str] = {}
         dates: dict[str, str] = {}
         sources = []
@@ -269,10 +284,9 @@ class Checker:
                             'text': focused_excerpt(page.source_passages, claim.span),
                             'tier': tier(page.url, self.cfg.official_domains,
                                          self.cfg.reference_domains)})
-        claim.sources = [{k: s[k] for k in ('url', 'title', 'tier', 'date', 'kind')} for s in sources]
+        listed = [{k: s[k] for k in ('url', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
-            claim.verdict, claim.reason = 'unverified', 'No readable source was found.'
-            return
+            return 'unverified', 'No readable source was found.', None, listed
         try:
             answer = self.llm.complete_json(
                 JUDGE_SYSTEM,
@@ -283,11 +297,10 @@ class Checker:
                                          'date': s['date'] or 'unknown', 'text': s['text']}
                                         for s in sources])))
         except LLMError as exc:
-            claim.verdict, claim.reason = 'unverified', f'Judging failed: {exc}'
-            return
-        claim.verdict, receipt, claim.reason = verify.check(
+            return 'unverified', f'Judging failed: {exc}', None, listed
+        verdict, receipt, reason = verify.check(
             claim, answer, pages, article_date=report.date, source_dates=dates)
         if receipt:
             src = next(s for s in sources if s['url'] == receipt['url'])
             receipt['tier'], receipt['date'], receipt['kind'] = src['tier'], src['date'], src['kind']
-        claim.receipt = receipt
+        return verdict, reason, receipt, listed
