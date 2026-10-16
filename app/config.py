@@ -59,7 +59,7 @@ class Config:
     default_tiers: bool = field(default_factory=lambda: os.environ.get('CC_DEFAULT_TIERS', '1') != '0')
     max_claims: int = field(default_factory=lambda: int(os.environ.get('CC_MAX_CLAIMS', '15')))
     max_sources_per_claim: int = field(default_factory=lambda: int(os.environ.get('CC_MAX_SOURCES', '3')))
-    workers: int = 6
+    workers: int = field(default_factory=lambda: int(os.environ.get('CC_WORKERS', '8')))
     # Reports (SQLite) and snapshots (PNG) live here.
     data_dir: str = field(default_factory=lambda: os.environ.get('CC_DATA_DIR', 'data'))
     # A finished report for the same URL younger than this is reused.

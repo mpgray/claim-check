@@ -20,6 +20,9 @@
     {% if r.subject %}<span>About <strong>{{ r.subject }}</strong></span>{% endif %}
     <span id="rdate" {% if not r.date %}hidden{% endif %}>Article dated <span>{{ r.date }}</span></span>
     <span>Checked <time datetime="{{ meta.created_at | int }}" data-ts="{{ meta.created_at }}"></time></span>
+    {% set t = r.timings or {} %}
+    {% if r.status == 'running' %}<span id="elapsed" data-start="{{ meta.created_at }}"></span>
+    {% elif t.total %}<span class="runtime" title="fetch {{ t.fetch }} s · find claims {{ t.extract }} s · check claims {{ t.judge }} s{% if t.snapshots %} · snapshots {{ t.snapshots }} s{% endif %}">⏱ {{ r.claims | length }} claims in {{ '%d min %d s' | format(t.total // 60, t.total % 60) if t.total >= 60 else '%d s' | format(t.total) }}</span>{% endif %}
     <button type="button" class="linkish" data-copy="{{ url_for('report', rid=rid, _external=True) }}">Copy link</button>
     <a href="{{ url_for('check', url=meta.url, fresh=1) }}" class="noprint">Re-check</a>
     <a href="{{ url_for('api_report', rid=rid) }}" class="noprint">JSON</a>

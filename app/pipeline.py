@@ -11,6 +11,7 @@ import json
 import math
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
@@ -20,10 +21,15 @@ from app import inflation, verify
 from app.config import Config
 from app.fetch import FetchError, Page, article_passages, fetch_page, focused_excerpt
 from app.llm import LLM, LLMError
-from app.prompts import EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM, JUDGE_USER
+from app.prompts import (EXTRACT_SECOND_PASS, EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM,
+                         JUDGE_USER)
 from app.search import TIER_RANK, Search, tier, unarchive
 
-CHUNK_CHARS = 30_000       # one extraction call
+CHUNK_CHARS = 30_000       # default chunk size for chunk_passages
+SECTION_CHARS = 4_000      # one extraction call reads about this much: small enough to list everything
+MAX_SECTIONS = 12          # per pass; longer articles get larger sections, not more calls
+HEADROOM = 1.5             # each section proposes its share of the claim limit, plus this margin
+MAX_EXTRACT_CALLS = 24     # extraction calls run all at once, up to this many
 MAX_ARTICLE_CHARS = 200_000  # beyond this the article is not read, and the report says so
 
 
@@ -48,6 +54,7 @@ class Report:
     snapshot: dict = field(default_factory=dict)
     status: str = 'running'    # running | done | error
     subject: str = ''          # what the article is about, confirmed in its text
+    timings: dict = field(default_factory=dict)   # seconds per stage: fetch, extract, judge, snapshots, total
     subject_names: list[str] = field(default_factory=list)
     id: str = ''               # the stored report's id, when there is one
 
@@ -90,6 +97,26 @@ def chunk_passages(passages: list[str], size: int = CHUNK_CHARS,
         length += cost
         used += cost
     return [c for c in chunks if c], max(0, total - used)
+
+
+def merge_passes(first, second) -> list[dict]:
+    """One section's claims from two extraction passes, de-duplicated by
+    normalised span: those both passes found first, then each pass's own."""
+    def clean(items):
+        out, seen = [], set()
+        for item in items or []:
+            if isinstance(item, dict):
+                key = claims_mod.norm(item.get('span') or '')
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append((key, item))
+        return out
+    a, b = clean(first), clean(second)
+    b_keys = {k for k, _ in b}
+    a_keys = {k for k, _ in a}
+    return ([item for k, item in a if k in b_keys]
+            + [item for k, item in a if k not in b_keys]
+            + [item for k, item in b if k not in a_keys])
 
 
 def summarize(report: Report) -> None:
@@ -188,6 +215,15 @@ class Checker:
             with self.lock:
                 handler(kind, report, data)
         report = Report(url=url, id=report_id)
+        started = mark = time.monotonic()
+
+        def lap(stage: str) -> None:
+            nonlocal mark
+            now = time.monotonic()
+            report.timings[stage] = round(now - mark, 1)
+            report.timings['total'] = round(now - started, 1)
+            mark = now
+
         try:
             page = self.fetch(url)
         except FetchError as exc:
@@ -196,7 +232,13 @@ class Checker:
             return report
         with self._cache_lock:
             self._page_cache[url] = self._page_cache[page.url] = page
-        chunks, report.truncated_chars = chunk_passages(article_passages(page.passages))
+        kept = article_passages(page.passages)
+        readable = min(MAX_ARTICLE_CHARS, sum(len(p) + 2 for p in kept))
+        size = max(SECTION_CHARS, math.ceil(readable / MAX_SECTIONS))
+        chunks, report.truncated_chars = chunk_passages(kept, size=size)
+        while len(chunks) > MAX_SECTIONS:      # whole paragraphs do not divide evenly
+            size = math.ceil(size * 1.1)
+            chunks, report.truncated_chars = chunk_passages(kept, size=size)
         read = [p for chunk in chunks for p in chunk]
         body = '\n\n'.join(read)
         report.url, report.title, report.passages, report.date = page.url, page.title, read, page.date
@@ -204,9 +246,11 @@ class Checker:
         report.cited_links = _cited_links(page.links, page.url)
         self._link_context = [(urljoin(page.url, h).split('#', 1)[0], ctx, off)
                               for h, ctx, off in page.link_context]
+        lap('fetch')
         emit('fetched', report, {'title': page.title})
 
         raw = self._extract(chunks, report)
+        lap('extract')
         if not raw and report.extract_errors:
             report.error = f'Claim extraction failed: {report.extract_errors[0]}'
             report.status = 'error'
@@ -232,6 +276,7 @@ class Checker:
                 emit('claim', report, {'id': claim.id})
         report.search_error = self.search_error
         summarize(report)
+        lap('judge')
 
         if self.snapshotter:
             emit('snapshotting', report, {})
@@ -239,27 +284,37 @@ class Checker:
                 self.snapshotter.capture(report, self)
             except Exception as exc:
                 report.snapshot = {'error': f'Snapshots failed: {exc}'[:300]}
+            lap('snapshots')
             emit('snapshots', report, {})
         report.status = 'done'
         emit('done', report, {})
         return report
 
     def _extract(self, chunks: list[list[str]], report: Report) -> list[dict]:
-        total = sum(len(p) for chunk in chunks for p in chunk) or 1
+        """Every claim the extractor proposes, from two passes over each
+        section, merged and de-duplicated. Order decides which claims fit
+        under the claim limit: found by both passes first, then the rest,
+        interleaved across sections so the whole article is sampled, and
+        opinions last."""
 
-        def one(chunk: list[str]) -> dict:
-            text = '\n\n'.join(chunk)
-            # Each chunk asks for its share of the limit, so a long article's
-            # claims are not all taken from its first screen.
-            share = max(3, math.ceil(self.cfg.max_claims * len(text) / total) + 1)
+        # Asking each section for every claim gave ~150 claims for 25 slots
+        # and two minutes of model output; its share of the limit with
+        # headroom keeps both passes useful and the calls short.
+        share = max(5, math.ceil(HEADROOM * self.cfg.max_claims / max(1, len(chunks))))
+
+        def one(i: int, second: bool) -> dict:
+            system = EXTRACT_SYSTEM.replace('{limit}', str(share))
+            if second:
+                system += EXTRACT_SECOND_PASS
             return self.llm.complete_json(
-                EXTRACT_SYSTEM.replace('{limit}', str(share)),
-                EXTRACT_USER.format(title=report.title or 'unknown',
-                                    article_date=report.date or 'unknown', article=text)) or {}
+                system, EXTRACT_USER.format(
+                    title=report.title or 'unknown', article_date=report.date or 'unknown',
+                    section=i + 1, sections=len(chunks), article='\n\n'.join(chunks[i]))) or {}
 
-        answers: list[dict] = [{} for _ in chunks]
-        with ThreadPoolExecutor(min(self.cfg.workers, len(chunks) or 1)) as pool:
-            futures = {pool.submit(one, chunk): i for i, chunk in enumerate(chunks)}
+        answers: dict[tuple[int, bool], dict] = {}
+        jobs = [(i, second) for i in range(len(chunks)) for second in (False, True)]
+        with ThreadPoolExecutor(min(MAX_EXTRACT_CALLS, len(jobs) or 1)) as pool:
+            futures = {pool.submit(one, i, second): (i, second) for i, second in jobs}
             for fut in as_completed(futures):
                 try:
                     answers[futures[fut]] = fut.result()
@@ -267,13 +322,15 @@ class Checker:
                     report.extract_errors.append(str(exc))
         body = ' '.join(p for chunk in chunks for p in chunk)
         report.subject, report.subject_names = claims_mod.validate_subject(
-            answers, report.title, body)
-        results = [a.get('claims') or [] for a in answers]
-        # Interleave so the claim limit samples every chunk, not just the first.
-        out, depth = [], max((len(r) for r in results), default=0)
+            [answers[k] for k in sorted(answers)], report.title, body)
+        sections = [merge_passes((answers.get((i, False)) or {}).get('claims'),
+                                 (answers.get((i, True)) or {}).get('claims'))
+                    for i in range(len(chunks))]
+        out, depth = [], max((len(r) for r in sections), default=0)
         for i in range(depth):
-            out += [r[i] for r in results if i < len(r) and isinstance(r[i], dict)]
-        return out
+            out += [r[i] for r in sections if i < len(r)]
+        return ([c for c in out if str(c.get('kind', '')).lower() != 'opinion']
+                + [c for c in out if str(c.get('kind', '')).lower() == 'opinion'])
 
     def _own_citations(self, claim: claims_mod.Claim, cited: list[str]) -> list[str]:
         """Links the article attaches to this claim: does the citation say that?

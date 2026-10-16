@@ -15,7 +15,8 @@ the source with that sentence highlighted.
 fetch article ─► readable body (trafilatura)      app/fetch.py
       │          + declared date, cited links     app/dates.py
       │            tied to their passage
-model: extract claims, 30k-char chunks (≤200k)    app/prompts.py, app/llm.py
+model: extract claims in ~4k-char sections (≤12, app/prompts.py, app/llm.py
+      ≤200k chars), two passes per section, merged
       │  and the article's subject; code keeps the
       │  subject only if the article's text names it
       │
@@ -110,7 +111,9 @@ uv run python -m app            # http://127.0.0.1:8050 — offline FakeLLM
 
 Reports and snapshots go to `data/` (`CC_DATA_DIR`). A check of the same URL
 within an hour reuses the stored report (`CC_CACHE_SECONDS`; `?fresh=1` on
-`/check` forces a new one). `CC_SNAPSHOTS=0` turns snapshots off.
+`/check` forces a new one). `CC_SNAPSHOTS=0` turns snapshots off. `CC_WORKERS` (default 8) sets how many
+claims are checked at once. Each report records how long each stage took and
+shows the total in its header.
 `/api/check?url=` still runs synchronously and returns JSON.
 
 ### Demo setup: OpenRouter + Gemma 4

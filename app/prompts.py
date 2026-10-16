@@ -1,6 +1,6 @@
 """The two model calls. Both return JSON; code checks everything they return."""
 
-EXTRACT_SYSTEM = """EXTRACT factual claims from an article.
+EXTRACT_SYSTEM = """EXTRACT every checkable factual claim from one section of an article.
 
 Return JSON: {"subject": ..., "aliases": [...],
               "claims": [{"span": ..., "kind": ..., "value": ..., "query": ...}]}
@@ -9,6 +9,12 @@ Return JSON: {"subject": ..., "aliases": [...],
   product, person, place, organisation, event or law), named exactly as the
   article names it. "" if the article has no single subject.
 - aliases: up to 3 other names the article itself uses for the subject.
+
+List the sentences in the section that assert something a source could
+confirm or refute: figures, dates, names, rules, how something works,
+causes, comparisons, rankings, attributed quotes. Fill the quota below when
+the section has that many; do not stop at the two or three most important.
+Leave out headings, questions and sentences with no factual content.
 
 - span: copy the claim's sentence EXACTLY as it appears in the article,
   character for character. Do not paraphrase, shorten or fix it.
@@ -22,10 +28,17 @@ Return JSON: {"subject": ..., "aliases": [...],
   the claim is about a current or time-bound figure, include the year it
   applies to (the article's date is given; use it when the claim gives none).
 
-Prefer specific, checkable claims (figures, dates, legal requirements,
-attributed quotes) over general statements. At most {limit} claims."""
+Up to {limit} claims for this section, spread across all of it."""
 
-EXTRACT_USER = "ARTICLE TITLE: {title}\nARTICLE DATE: {article_date}\nARTICLE:\n{article}"
+# The second extraction pass: the same task, worded to walk the section line
+# by line. An identical repeat at temperature 0 mostly returns the same list.
+EXTRACT_SECOND_PASS = """
+
+Work through the section one sentence at a time, from the first line to the
+last, and include each sentence that makes a factual assertion, even one that
+seems minor or obvious."""
+
+EXTRACT_USER = "ARTICLE TITLE: {title}\nARTICLE DATE: {article_date}\nSECTION {section} OF {sections}:\n\nARTICLE:\n{article}"
 
 JUDGE_SYSTEM = """JUDGE one claim against the source passages provided.
 

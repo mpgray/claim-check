@@ -118,12 +118,25 @@
 
   progress.hidden = false;
   progress.textContent = 'Fetching the article…';
+  // A live clock while the check runs: the wait is part of the demo.
+  var clock = document.getElementById('elapsed');
+  var tick = clock && setInterval(function () {
+    var s = Math.max(0, Math.round(Date.now() / 1000 - parseFloat(clock.dataset.start)));
+    clock.textContent = '⏱ ' + Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }, 500);
   var finished = false;
 
   function finish() {
     if (finished) return;
     finished = true;
     progress.hidden = true;
+    if (tick) clearInterval(tick);
+    // The final time comes with the server-rendered header.
+    get(location.pathname).then(function (html) {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var fresh = doc.querySelector('.rhead .meta'), old = document.querySelector('.rhead .meta');
+      if (fresh && old) { old.replaceWith(fresh); stamp(); }
+    });
     body.dataset.status = 'done';
     refreshBody();
     refreshTitle();

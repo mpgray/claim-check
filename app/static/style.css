@@ -141,3 +141,4 @@ details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
   a { color: #1a4db3; }
 }
 body.print details > * { display: block; }
+.runtime, #elapsed { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }

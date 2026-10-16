@@ -226,3 +226,9 @@ def test_archived_copies_count_as_the_site_they_archive():
     assert unarchive(url) == 'http://news.bbc.co.uk/1/hi/entertainment/4251227.stm'
     assert tier(url, [], []) == 'reference'
     assert site('https://web.archive.org/web/2020/https://blog.example/wage') == site(ARTICLE_URL)
+
+
+def test_reports_record_how_long_each_stage_took():
+    report = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch).run(ARTICLE_URL)
+    assert {'fetch', 'extract', 'judge', 'total'} <= set(report.timings)
+    assert report.timings['total'] >= report.timings['judge']
