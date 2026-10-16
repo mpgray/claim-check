@@ -10,7 +10,7 @@
     <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.article_full or r.snapshot.article_full) }}" target="_blank" title="In the article">
       <img src="{{ url_for('snap', rid=rid, name=snap.article_crop) }}" alt="The claim highlighted in the article" loading="lazy"></a>
   {% elif snap.article_found is sameas false %}
-    <p class="note">Not found in the rendered article page, so it is not highlighted in the snapshot.</p>
+    <p class="note">This sentence was in the fetched article but not in the page as a browser renders it, so the snapshot has no highlight for it.</p>
   {% endif %}
   {% if c.reason %}<p class="reason">{{ c.reason }}</p>{% endif %}
   {% if c.receipt %}
@@ -24,6 +24,8 @@
         <p class="note">Captured {{ snap.captured_at or r.snapshot.captured_at }}. The live link may change; this image will not.</p>
       {% elif c.receipt.kind == 'pdf' %}
         <p class="note">PDF source: the quote was verified in its text; no image is captured.</p>
+      {% elif snap.source_error %}
+        <p class="note">{{ snap.source_error }}</p>
       {% elif snap.source_found is sameas false %}
         <p class="note">The quote is in the page's text but was not found in the rendered page (it may be added by scripts), so the image has no highlight.</p>
       {% endif %}

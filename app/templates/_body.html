@@ -37,12 +37,11 @@
 
 {% if r.snapshot and r.snapshot.article_full %}
   <p class="snapline">📷 <a href="{{ url_for('snap', rid=rid, name=r.snapshot.article_full) }}" target="_blank">Snapshot of the article</a>
-    with every claim highlighted, captured {{ r.snapshot.captured_at }}.</p>
-{% elif r.snapshot and r.snapshot.error %}
-  <p class="note">{{ r.snapshot.error }}</p>
-{% elif r.status == 'running' and r.claims %}
-  <p class="note" id="snapnote" hidden>Capturing snapshots…</p>
+    with {{ r.snapshot.article_found }} of {{ r.claims | length }} claims highlighted in their verdict colour, captured {{ r.snapshot.captured_at }}.
+    {%- if r.snapshot.article_partial %} The page is very long, so the image covers the part with the claims.{% endif %}</p>
 {% endif %}
+{% if r.snapshot and r.snapshot.article_error %}<p class="note">{{ r.snapshot.article_error }}</p>{% endif %}
+{% if r.snapshot and r.snapshot.error %}<p class="note">{{ r.snapshot.error }}</p>{% endif %}
 
 <ol class="claims">
 {% for c in r.claims %}

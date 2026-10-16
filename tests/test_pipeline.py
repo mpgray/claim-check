@@ -149,3 +149,15 @@ def test_search_outage_is_reported_not_silent():
     assert 'Search failed' in report.search_error
     # The cited-link path still works.
     assert report.counts['supported'] == 1
+
+
+def test_snapshots_run_after_judging_and_a_failure_never_sinks_the_report():
+    seen = {}
+
+    class Snap:
+        def capture(self, report, checker):
+            seen['verdicts'] = [c.verdict for c in report.claims]
+            raise RuntimeError('chromium missing')
+    report = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch, snapshotter=Snap()).run(ARTICLE_URL)
+    assert 'pending' not in seen['verdicts']
+    assert report.status == 'done' and 'chromium missing' in report.snapshot['error']

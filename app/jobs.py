@@ -33,7 +33,7 @@ class Jobs:
 
     def _run(self, rid: str, url: str) -> None:
         try:
-            self.factory().run(url, on_event=lambda k, r, d: self._on(rid, k, r, d))
+            self.factory().run(url, on_event=lambda k, r, d: self._on(rid, k, r, d), report_id=rid)
         except Exception as exc:  # a crash is a report with an error, not a spinner forever
             loaded = self.store.load(rid)
             report = loaded[0] if loaded else Report(url=url)

@@ -44,6 +44,7 @@ class Report:
     extract_errors: list[str] = field(default_factory=list)
     snapshot: dict = field(default_factory=dict)
     status: str = 'running'    # running | done | error
+    id: str = ''               # the stored report's id, when there is one
 
 
 def site(url: str) -> str:
@@ -132,13 +133,13 @@ class Checker:
         with self._cache_lock:
             return self._page_cache.get(url)
 
-    def run(self, url: str, on_event=None) -> Report:
+    def run(self, url: str, on_event=None, report_id: str = '') -> Report:
         handler = on_event or _noop
 
         def emit(kind, report, data):
             with self.lock:
                 handler(kind, report, data)
-        report = Report(url=url)
+        report = Report(url=url, id=report_id)
         try:
             page = self.fetch(url)
         except FetchError as exc:
