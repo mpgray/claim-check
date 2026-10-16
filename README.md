@@ -11,6 +11,9 @@ ends up **supported**, **contradicted**, **outdated**, **unverified** or
 
 > A model that cannot produce a receipt gets "unverified", never "probably fine".
 
+▶ **[Watch the 90-second demo](docs/claim-check-demo.mp4)**: a live check of a
+Wikipedia article, from pasting the link to the highlighted snapshots.
+
 ![A Claim Check report on the Wikipedia article about Prince](docs/report.png)
 
 ## What makes it different
