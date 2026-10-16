@@ -385,11 +385,16 @@ class Checker:
         return sorted(found, key=lambda u: TIER_RANK[self._tier(u)])
 
     @staticmethod
-    def anchored(query: str, report: Report) -> str:
-        """The claim's query, naming the article's subject. A sentence read
-        alone ("Undermining is a foundation piece losing substrate contact")
-        searches every game ever made unless the query says which one."""
-        if not report.subject or not query or claims_mod.mentions(query, report.subject_names):
+    def anchored(query: str, report: Report, names: list[str] | None = None) -> str:
+        """The claim's query, naming what it is about. A sentence read alone
+        ("Undermining is a foundation piece losing substrate contact")
+        searches every game ever made unless the query says which one. A query
+        that already names the subject or a specific name from the claim
+        ("Jenny Lawson") is left alone: on a roundup article, the article's
+        theme would only blur it."""
+        if not report.subject or not query:
+            return query
+        if claims_mod.mentions(query, report.subject_names + (names or [])):
             return query
         return f'{report.subject} {query}'
 
@@ -401,7 +406,7 @@ class Checker:
         # citation is checked rather than trusted.
         urls: list[str] = own_cites[:4]
         if claim.query:
-            urls += self._search(self.anchored(claim.query, report))
+            urls += self._search(self.anchored(claim.query, report, claims_mod.entities(claim.span)))
         # The article's own citations are leads too, but never the only lead
         # when search is available: a citation is what is being checked.
         urls += own_cites[4:] + cited
@@ -425,7 +430,7 @@ class Checker:
 
     def _judge(self, claim: claims_mod.Claim, report: Report) -> None:
         check, value = self._inflation(claim, report)
-        verdict, reason, receipt, sources = self._decide(claim, report, value)
+        verdict, reason, receipt, sources, rejected = self._decide(claim, report, value)
         if check:
             verdict, reason, receipt = merge_inflation(check, verdict, reason, receipt)
         citations = audit_citations(self._own_citations(claim, report.cited_links),
@@ -435,6 +440,7 @@ class Checker:
             claim.verdict, claim.reason = verdict, reason
             claim.checks = [check] if check else []
             claim.citations = citations
+            claim.rejected_receipt = rejected
 
     def _inflation(self, claim: claims_mod.Claim, report: Report) -> tuple[dict | None, str | None]:
         """(computed check, value to judge instead) for a claim with an
@@ -459,14 +465,17 @@ class Checker:
         return check, value
 
     def _decide(self, claim: claims_mod.Claim, report: Report, value: str | None = None):
-        """(verdict, reason, receipt, sources) for one claim; writes nothing."""
+        """(verdict, reason, receipt, sources, rejected receipt) for one claim;
+        writes nothing."""
         if claim.kind == 'opinion':
-            return 'opinion', 'Judgement or advice; not checked.', None, []
+            return 'opinion', 'Judgement or advice; not checked.', None, [], None
         pages: dict[str, str] = {}
         dates: dict[str, str] = {}
         sources = []
         own = set(self._own_citations(claim, report.cited_links))
         state = {'own_read': 0, 'keys': set(), 'tried': set()}
+        names = claims_mod.entities(claim.span)
+        on_topic_names = report.subject_names + names if report.subject_names else []
 
         def read(urls):
             for url in urls:
@@ -479,12 +488,14 @@ class Checker:
                 page = self._page(url)
                 if not page or site(page.url) == site(report.url):
                     continue
-                # A page that never names the article's subject is about
-                # something else (another game's wiki, a soil-engineering
-                # paper), however well it matches the words. The claim's own
-                # citations are exempt: the article chose them.
-                if (report.subject_names and url not in own
-                        and not claims_mod.mentions(f'{page.title} {page.text}', report.subject_names)):
+                # A page that names neither the article's subject nor anything
+                # specific the claim names is about something else (another
+                # game's wiki, a soil-engineering paper), however well it
+                # matches the words. On a roundup article ("best audiobook
+                # performances") the claim's own names ("Jenny Lawson") are
+                # what a source mentions. The claim's own citations are exempt.
+                if (on_topic_names and url not in own
+                        and not claims_mod.mentions(f'{page.title} {page.text}', on_topic_names)):
                     claim.dropped_offtopic += 1
                     continue
                 state['keys'].add(key)
@@ -500,11 +511,12 @@ class Checker:
         if len(sources) < self.cfg.max_sources_per_claim and report.subject and claim.query \
                 and claim.dropped_offtopic:
             # Off-topic results crowded out the source limit: search once more
-            # with the subject as an exact phrase.
-            read(self._not_self(self._search(f'"{report.subject}" {claim.query}'), claim, report.url))
+            # with the most specific name as an exact phrase.
+            phrase = max(names, key=len) if names else report.subject
+            read(self._not_self(self._search(f'"{phrase}" {claim.query}'), claim, report.url))
         listed = [{k: s[k] for k in ('url', 'requested', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
-            return 'unverified', 'No readable source was found.', None, listed
+            return 'unverified', 'No readable source was found.', None, listed, None
         try:
             answer = self.llm.complete_json(
                 JUDGE_SYSTEM,
@@ -516,11 +528,17 @@ class Checker:
                                          'date': s['date'] or 'unknown', 'text': s['text']}
                                         for s in sources])))
         except LLMError as exc:
-            return 'unverified', f'Judging failed: {exc}', None, listed
+            return 'unverified', f'Judging failed: {exc}', None, listed, None
         judged = dataclasses.replace(claim, value=value) if value else claim
         verdict, receipt, reason = verify.check(
             judged, answer, pages, article_date=report.date, source_dates=dates)
         if receipt:
             src = next(s for s in sources if s['url'] == receipt['url'])
             receipt['tier'], receipt['date'], receipt['kind'] = src['tier'], src['date'], src['kind']
-        return verdict, reason, receipt, listed
+        rejected = None
+        claimed = str(answer.get('verdict') or '').lower()
+        if verdict == 'unverified' and claimed in verify.JUDGED:
+            # Shown on the report: what the model cited, and why code refused it.
+            rejected = {'verdict': claimed, 'url': str(answer.get('url') or '')[:500],
+                        'quote': str(answer.get('quote') or '').strip()[:600], 'why': reason}
+        return verdict, reason, receipt, listed, rejected

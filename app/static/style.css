@@ -142,3 +142,5 @@ details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
 }
 body.print details > * { display: block; }
 .runtime, #elapsed { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.rejected { margin: .35rem 0; padding: .4rem .6rem; border: 1px dashed var(--border); border-radius: calc(var(--radius) - 4px); font-size: .9rem; }
+.rejected p { margin: .3rem 0; }

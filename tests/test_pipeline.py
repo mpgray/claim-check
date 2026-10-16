@@ -232,3 +232,17 @@ def test_reports_record_how_long_each_stage_took():
     report = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch).run(ARTICLE_URL)
     assert {'fetch', 'extract', 'judge', 'total'} <= set(report.timings)
     assert report.timings['total'] >= report.timings['judge']
+
+
+def test_a_refused_receipt_is_kept_for_the_report():
+    class Paraphraser(FakeLLM):
+        def complete_json(self, system, user):
+            if 'EXTRACT' in system:
+                return super().complete_json(system, user)
+            return {'verdict': 'supported', 'url': SOURCE_URL,
+                    'quote': 'The minimum wage is about seven dollars and a quarter.', 'reason': 'Close enough.'}
+    report = Checker(Config(), Paraphraser(), FakeSearch(), fetch=fake_fetch).run(ARTICLE_URL)
+    wage = next(c for c in report.claims if '7.25' in c.span)
+    assert wage.verdict == 'unverified' and wage.receipt is None
+    assert wage.rejected_receipt['verdict'] == 'supported'
+    assert 'seven dollars' in wage.rejected_receipt['quote'] and 'not on the cited page' in wage.rejected_receipt['why']

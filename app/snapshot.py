@@ -283,7 +283,10 @@ class Snapshotter:
                 self._set(checker, c, source_error=f'Could not render the source: {exc}'.split('\n')[0][:200])
             return
         try:
-            items = [{'id': f'q{c.id}', 'text': c.receipt['quote'], 'cls': 'quote'} for c in claims]
+            # The first excerpt is what the viewer jumps to; a joined quote
+            # ("a … b") is not one run of text on the page.
+            items = [{'id': f'q{c.id}', 'cls': 'quote',
+                      'text': (c.receipt.get('excerpts') or [c.receipt['quote']])[0]} for c in claims]
             marks = await self._highlight(page, items)
             found = [m['rect'] for m in marks.values() if m.get('found')]
             if not found:

@@ -90,3 +90,35 @@ def test_claim_with_its_own_year_is_judged_by_that_year():
     verdict, _, _ = check(claim, {'verdict': 'contradicted', 'url': SEATTLE, 'quote': text},
                           {SEATTLE: text}, article_date='2026-01-01')
     assert verdict == 'contradicted'
+
+
+from app.verify import find_excerpts
+
+BIO = ('Prince was born Prince Rogers Nelson in Minneapolis, Minnesota on June 7, 1958. '
+       'His father, John Nelson, was a songwriter. ' + 'Filler sentence about his career. ' * 20 +
+       'Prince died on April 21, 2016 at the age of 57.')
+
+
+def test_excerpts_joined_by_ellipsis_each_held_to_the_page():
+    quote = 'Prince was born Prince Rogers Nelson in Minneapolis, Minnesota on June 7, 1958. ... Prince died on April 21, 2016 at the age of 57.'
+    excerpts, why = find_excerpts(quote, BIO)
+    assert len(excerpts) == 2 and why == ''
+    claim = Claim(id=1, span='Prince (June 7, 1958 – April 21, 2016) was a singer.', kind='date',
+                  value='June 7, 1958 – April 21, 2016')
+    verdict, receipt, _ = check(claim, {'verdict': 'supported', 'url': PAGE, 'quote': quote}, {PAGE: BIO})
+    assert verdict == 'supported' and receipt['link'].count('text=') == 2
+
+
+def test_punctuation_drift_is_not_a_different_quote_but_a_changed_word_is():
+    page = 'The singer posted a lyric video for the new song "Screwdriver," which leaked last week.'
+    assert find_excerpts('posted a lyric video for the new song Screwdriver,, which leaked last week', page)[0]
+    assert not find_excerpts('posted a lyric video for the new song Screwdriver, which leaked this week', page)[0]
+    # The receipt is the page's own text, not the model's copy.
+    assert '"Screwdriver,"' in find_excerpts('the new song Screwdriver,, which leaked', page)[0][0]
+
+
+def test_excerpts_far_apart_or_too_many_are_refused():
+    far = 'Born on June 7, 1958 in Minneapolis. ' + 'x ' * 4000 + 'He died on April 21, 2016 at home.'
+    assert 'too far apart' in find_excerpts('Born on June 7, 1958 in Minneapolis ... He died on April 21, 2016 at home', far)[1]
+    many = ' ... '.join(['Filler sentence about his career'] * 4)
+    assert 'more than 3' in find_excerpts(many, BIO)[1]

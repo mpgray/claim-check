@@ -41,6 +41,14 @@
       {% endif %}
     </div>
   {% endif %}
+  {% if c.rejected_receipt and not c.receipt %}
+    {% set rr = c.rejected_receipt %}
+    <details class="rejected"><summary>Receipt refused: the model said <strong>{{ rr.verdict }}</strong></summary>
+      <p>It cited {% if rr.url %}<a href="{{ rr.url }}" rel="noopener" target="_blank">{{ rr.url.split('/')[2] if '//' in rr.url else rr.url }}</a>{% else %}no page{% endif %}:
+        {% if rr.quote %}“{{ rr.quote }}”{% else %}no quote{% endif %}</p>
+      <p class="note">{{ rr.why }} A verdict only counts when code finds its quote word for word on the page and, for a figure, every number and date of the claim in it.</p>
+    </details>
+  {% endif %}
   {% if c.sources and (not c.receipt or c.sources | length > 1) %}
     <details><summary>Sources read ({{ c.sources | length }})</summary>
       <ul>{% for s in c.sources %}<li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.title or s.url }}</a>

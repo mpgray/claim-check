@@ -9,17 +9,23 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
 
 - A claim survives only if its `span` is verbatim article text
   (`app/claims.validate`).
-- A verdict other than `unverified` survives only if its quote is on a page
-  that was actually fetched, contains the claim's figure when it is a figure,
-  and `outdated` carries a date (`app/verify.check`). A failed check becomes
+- A verdict other than `unverified` survives only if its quote is word for
+  word on a page that was actually fetched (`verify.find_excerpts`: the same
+  words in the same order, case, whitespace and punctuation aside; up to three
+  excerpts joined by "...", all within 5,000 characters; the receipt is the
+  page's own text), contains every number and date of
+  the claim's value when it is a figure (compared by value in `app/figures.py`:
+  "100 million" is "100,000,000", each date of a range on its own; never a
+  near miss), and `outdated` carries a date (`app/verify.check`). A failed check becomes
   `unverified` with the reason; it is never retried into a pass.
 - A `contradicted` from a source older than the claim's moment (the span's
   year, else the article's date) becomes `unverified` (`verify.stale_contradiction`).
 - The article's own site is never a source (`pipeline.site`).
 - The article's subject is the model's proposal, kept only if the article's
   text names it (`claims.validate_subject`). Every search query names it, and
-  a source page that never mentions it is dropped before judging (the claim's
-  own citations are exempt).
+  a source page that names neither it nor a specific name from the claim
+  (`claims.entities`) is dropped before judging (the claim's own citations
+  are exempt). A refused receipt is kept on the claim and shown, never used.
 - Fixes stay generic: this checks ANY article, so no topic-specific data
   (a game database, a curated per-topic domain list) is a source of truth.
 - Source tier comes from the host, never from the model.

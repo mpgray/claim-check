@@ -19,9 +19,12 @@ Wikipedia article, from pasting the link to the highlighted snapshots.
 ## What makes it different
 
 - **Receipts, held to the page.** A supported, contradicted or outdated
-  verdict needs a quote that code finds word for word on a page that was
-  actually fetched. A figure claim needs that figure in the quote. A failed
-  check becomes "unverified" with the reason; it is never retried into a pass.
+  verdict needs a quote (or up to three excerpts of one page) that code finds
+  word for word on a page that was
+  actually fetched. A figure claim needs every number and date of it in the
+  quote, compared by value ("100 million" matches "100,000,000"; "150
+  million" never does). A failed check becomes "unverified" with the reason,
+  and the refused quote is shown; it is never retried into a pass.
 - **The article is never its own source.** Search results from the article's
   own site, or an archived copy of it, are thrown out.
 - **Dates matter.** A source older than the claim cannot "contradict" it; it

@@ -71,3 +71,40 @@ def test_a_disambiguated_title_subject_also_matches_its_bare_name():
                                       'Prince (musician) - Wikipedia', 'Prince released Purple Rain in 1984.')
     assert subject == 'Prince (musician)' and 'Prince' in names
     assert mentions('Prince played 96 shows on the Musicology tour.', names)
+
+
+def test_claim_names_are_found_and_plain_words_are_not():
+    from app.claims import entities
+    assert entities("Robin Miles narrates N. K. Jemisin's The Fifth Season well.") == \
+        ['Robin Miles', 'N. K. Jemisin', 'The Fifth Season']
+    assert entities('Undermining is a foundation piece losing substrate contact.') == []
+    assert entities('Basic Composite | Sand | Short lifespan, fails in storms.') == ['Basic Composite']
+
+
+def test_a_roundup_article_keeps_sources_that_name_the_claims_own_subject():
+    article = Page('https://books.example/best', 'Narrators Who Elevate the Story', [
+        'These are the best audiobook performances of the decade, chosen by our editors.',
+        "Jenny Lawson's narration of her memoir turns every essay into a stand-up set."])
+    review = Page('https://reviews.example/lawson', 'Jenny Lawson reads her memoir', [
+        'Jenny Lawson narrates her own memoir, and the audiobook plays like a stand-up set.'])
+    queries = []
+
+    class Search:
+        def search(self, q):
+            queries.append(q)
+            return [{'url': review.url}]
+
+    class LLM:
+        def complete_json(self, system, user):
+            if 'EXTRACT' in system:
+                return {'subject': 'best audiobook performances', 'claims': [{
+                    'span': "Jenny Lawson's narration of her memoir turns every essay into a stand-up set.",
+                    'kind': 'other', 'query': 'Jenny Lawson memoir audiobook narration'}]}
+            return {'verdict': 'supported', 'url': review.url,
+                    'quote': 'Jenny Lawson narrates her own memoir, and the audiobook plays like a stand-up set.',
+                    'reason': 'The review says so.'}
+
+    pages = {article.url: article, review.url: review}
+    claim = Checker(Config(), LLM(), Search(), fetch=lambda u: pages[u]).run(article.url).claims[0]
+    assert claim.dropped_offtopic == 0 and claim.verdict == 'supported'
+    assert queries[0] == 'Jenny Lawson memoir audiobook narration'     # not blurred by the theme

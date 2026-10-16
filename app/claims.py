@@ -50,6 +50,7 @@ class Claim:
     checks: list[dict] = field(default_factory=list)   # computed by code (app.inflation)
     citations: list[dict] = field(default_factory=list)  # links in the claim's own passage, and what they said
     dropped_offtopic: int = 0  # sources read that never mention the article's subject
+    rejected_receipt: dict | None = None  # what the model cited when code refused it
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:
@@ -147,3 +148,64 @@ def mentions(text: str, names: list[str], limit: int = 300_000) -> bool:
     """Does this text name any of `names` (whole words, punctuation-blind)?"""
     hay = f' {topic_key(text[:limit])} '
     return any(f' {topic_key(n)} ' in hay for n in names if topic_key(n))
+
+
+_CONNECT = {'of', 'the', 'and', 'for', 'in', 'on', 'a', 'an', 'to', 'de', 'la', 'le', 'von',
+            'van', 'du', 'del', '&'}
+# Capitalised words that name nothing specific enough to tell pages apart.
+_PLAIN = {'the', 'a', 'an', 'i', 'it', 'he', 'she', 'they', 'we', 'this', 'that', 'these', 'those',
+          'in', 'on', 'at', 'as', 'but', 'and', 'or', 'if', 'when', 'while', 'after', 'before',
+          'american', 'british', 'english', 'european', 'canadian', 'australian', 'french',
+          'german', 'national', 'international', 'world', 'north', 'south', 'east', 'west',
+          'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+          'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september',
+          'october', 'november', 'december', 'mr', 'mrs', 'ms', 'dr'}
+_TOKEN = re.compile(r"[\w'’.&-]+")
+
+
+def entities(span: str) -> list[str]:
+    """Specific names in a claim's own text ("Jenny Lawson", "The Fifth
+    Season", "N. K. Jemisin"): runs of capitalised words not broken by
+    punctuation. A lone capitalised word counts only mid-sentence and only if
+    it is not a month, weekday, demonym or pronoun."""
+    out: list[str] = []
+    run: list[tuple[int, str]] = []
+    prev_end = None
+    starts: set[int] = {0}
+
+    def flush():
+        while run and run[-1][1].lower() in _CONNECT:
+            run.pop()
+        if run:
+            words = [w for _, w in run]
+            first_index = run[0][0]
+            name = ' '.join(words).strip(".'’")
+            key = topic_key(name)
+            single = len(words) == 1
+            if not (single and (first_index in starts or key in _PLAIN)) and _specific(key) \
+                    and not all(topic_key(w) in _PLAIN | _CONNECT for w in words):
+                out.append(name)
+        run.clear()
+
+    for i, m in enumerate(_TOKEN.finditer(span)):
+        word = m.group(0)
+        gap = span[prev_end:m.start()] if prev_end is not None else ''
+        if gap.strip():
+            flush()                      # punctuation between words ends a name
+            if re.search(r'[|.;:!?()\[\]"—–]', gap):
+                starts.add(i)            # and a sentence or table cell may start here
+        prev_end = m.end()
+        possessive = re.search(r"['’]s$", word)
+        if possessive:
+            word = word[:possessive.start()]
+        if word[:1].isupper():
+            run.append((i, word))
+            if possessive:
+                flush()                  # "Jemisin's The Fifth Season" is two names
+        elif run and word.lower() in _CONNECT:
+            run.append((i, word))
+        else:
+            flush()
+    flush()
+    seen: set = set()
+    return [n for n in out if not (topic_key(n) in seen or seen.add(topic_key(n)))]

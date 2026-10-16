@@ -8,9 +8,12 @@ import re
 from datetime import date
 from urllib.parse import quote as urlquote
 
+from app import figures
 from app.claims import Claim, norm
 
 JUDGED = ('supported', 'contradicted', 'outdated')
+MAX_EXCERPTS = 3        # a quote may be this many excerpts joined by "..."
+MAX_EXCERPT_SPREAD = 5000  # characters on the page from the first excerpt to the last
 VERDICTS = JUDGED + ('unverified', 'opinion')
 MIN_QUOTE = 12
 
@@ -58,6 +61,49 @@ def stale_contradiction(claim: Claim, quote: str, article_date: str, source_date
     return ''
 
 
+_WORD = re.compile(r'[^\W_]+')
+_SPLIT = re.compile(r'\s*(?:\.\.\.|\u2026|\[\s*\.\.\.\s*\]|\n\s*\n)\s*')
+
+
+def _words(text: str) -> list[tuple[str, int, int]]:
+    return [(m.group(0).lower(), m.start(), m.end()) for m in _WORD.finditer(text)]
+
+
+def find_excerpts(quote: str, page: str) -> tuple[list[str], str]:
+    """The page's own text for each excerpt of `quote`, or ([], why).
+
+    An excerpt matches when the page has the same words in the same order:
+    case, whitespace and punctuation aside, word for word. Up to three
+    excerpts joined by "..." (or a paragraph break), each at least 12
+    characters, all within 5,000 characters of each other on the page so
+    unrelated passages cannot be stitched into a receipt.
+    """
+    parts = [p.strip(' .,;:') for p in _SPLIT.split(quote or '')]
+    parts = [p for p in parts if _WORD.search(p)]
+    if not parts or len(norm(' '.join(parts))) < MIN_QUOTE:
+        return [], 'no usable quote.'
+    if len(parts) > MAX_EXCERPTS:
+        return [], f'the quote has more than {MAX_EXCERPTS} excerpts.'
+    page_words = _words(page)
+    tokens = [w for w, _, _ in page_words]
+    first_at: dict[str, list[int]] = {}
+    for i, w in enumerate(tokens):
+        first_at.setdefault(w, []).append(i)
+    found = []
+    for part in parts:
+        want = [w for w, _, _ in _words(part)]
+        if len(norm(part)) < MIN_QUOTE and len(parts) > 1:
+            return [], 'an excerpt of the quote is too short to check.'
+        hit = next((i for i in first_at.get(want[0], []) if tokens[i:i + len(want)] == want), None)
+        if hit is None:
+            return [], 'the quote is not on the cited page.'
+        start, end = page_words[hit][1], page_words[hit + len(want) - 1][2]
+        found.append((start, end))
+    if max(e for _, e in found) - min(s for s, _ in found) > MAX_EXCERPT_SPREAD:
+        return [], 'the excerpts of the quote are too far apart on the page.'
+    return [' '.join(page[s:e].split()) for s, e in found], ''
+
+
 def check(claim: Claim, answer: dict, pages: dict[str, str], *,
           article_date: str = '', source_dates: dict[str, str] | None = None
           ) -> tuple[str, dict | None, str]:
@@ -71,13 +117,20 @@ def check(claim: Claim, answer: dict, pages: dict[str, str], *,
     quote = str(answer.get('quote') or '').strip()
     if url not in pages:
         return 'unverified', None, 'Receipt failed: the cited page was not one that was read.'
-    if len(norm(quote)) < MIN_QUOTE:
-        return 'unverified', None, 'Receipt failed: no usable quote.'
-    if norm(quote) not in norm(pages[url]):
-        return 'unverified', None, 'Receipt failed: the quote is not on the cited page.'
+    excerpts, why = find_excerpts(quote, pages[url])
+    if not excerpts:
+        return 'unverified', None, f'Receipt failed: {why}'
+    # From here on the receipt is the page's own words, not the model's copy.
+    quote = ' … '.join(excerpts)
     if claim.kind in ('figure', 'date') and verdict == 'supported' and claim.value:
-        if _digits(claim.value) not in _digits(quote):
+        # Compared by value ("100 million" is "100,000,000"; each date of a
+        # range on its own); text comparison only for values with no figure.
+        gaps = figures.missing(claim.value, quote)
+        if gaps is None and _digits(claim.value) not in _digits(quote):
             return 'unverified', None, "Receipt failed: the quote does not contain the claim's figure."
+        if gaps:
+            return 'unverified', None, ("Receipt failed: the quote does not contain the claim's figure "
+                                        f"({', '.join(gaps)}).")
     if verdict == 'contradicted' and claim.kind in TIME_BOUND:
         why = stale_contradiction(claim, quote, article_date, (source_dates or {}).get(url, ''))
         if why:
@@ -88,8 +141,8 @@ def check(claim: Claim, answer: dict, pages: dict[str, str], *,
             date.fromisoformat(as_of)
         except ValueError:
             return 'unverified', None, 'Receipt failed: "outdated" needs the date it changed.'
-    receipt = {'url': url, 'quote': quote[:600], 'as_of': as_of,
-               'link': text_fragment_url(url, quote)}
+    receipt = {'url': url, 'quote': quote[:600], 'as_of': as_of, 'excerpts': excerpts,
+               'link': text_fragment_url(url, *excerpts)}
     return verdict, receipt, reason
 
 
@@ -98,16 +151,17 @@ def _frag(text: str) -> str:
     return urlquote(text, safe='').replace('-', '%2D')
 
 
-def text_fragment_url(url: str, quote: str) -> str:
-    """A link that opens `url` scrolled to and highlighting `quote`.
-
-    Long quotes use the `start,end` form so the URL stays short and still
-    matches when the middle contains markup the browser renders differently.
-    """
-    base = url.split('#', 1)[0]
+def _directive(quote: str) -> str:
+    # Long quotes use the `start,end` form so the URL stays short and still
+    # matches when the middle contains markup the browser renders differently.
     words = ' '.join(quote.split()).split(' ')
     if len(words) > 12:
-        frag = f"{_frag(' '.join(words[:5]))},{_frag(' '.join(words[-5:]))}"
-    else:
-        frag = _frag(' '.join(words))
-    return f'{base}#:~:text={frag}'
+        return f"text={_frag(' '.join(words[:5]))},{_frag(' '.join(words[-5:]))}"
+    return f"text={_frag(' '.join(words))}"
+
+
+def text_fragment_url(url: str, *quotes: str) -> str:
+    """A link that opens `url` scrolled to and highlighting each quote
+    (several excerpts become several `text=` directives)."""
+    base = url.split('#', 1)[0]
+    return f"{base}#:~:{'&'.join(_directive(q) for q in quotes if q.strip())}"

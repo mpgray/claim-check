@@ -50,8 +50,11 @@ Return JSON: {"verdict": ..., "url": ..., "quote": ..., "as_of": ..., "reason": 
   - outdated: it was true, but a source shows it has since changed.
   - unverified: the passages do not settle it. Say this rather than guess.
 - url: the source URL the quote comes from, exactly as given.
-- quote: copy the deciding sentence EXACTLY from that source's text.
-  Your verdict is discarded if the quote is not found verbatim.
+- quote: copy the deciding sentence EXACTLY from that source's text. If the
+  claim's figures or dates are in different places on that page, give up to
+  three exact excerpts joined by " ... ". Every figure and date in the claim
+  must be in the quote. Your verdict is discarded if any excerpt is not found
+  word for word.
 - as_of: for outdated, the ISO date (YYYY-MM-DD) it changed; else "".
 - reason: one plain sentence for a reader.
 
