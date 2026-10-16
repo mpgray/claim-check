@@ -31,6 +31,39 @@
     });
   });
 
+  // Feedback on a verdict: one vote per claim per browser (remembered locally).
+  function votedKey(rid, cid) { return 'cc-vote:' + rid + ':' + cid; }
+  function markVotes(root) {
+    var b = document.getElementById('report-body');
+    if (!b) return;
+    root.querySelectorAll('.fb').forEach(function (fb) {
+      var v = null;
+      try { v = localStorage.getItem(votedKey(b.dataset.id, fb.dataset.claim)); } catch (_) {}
+      fb.querySelectorAll('.fbtn').forEach(function (btn) { btn.classList.toggle('on', btn.dataset.vote === v); });
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.fbtn');
+    if (!btn) return;
+    var fb = btn.closest('.fb'), b = document.getElementById('report-body');
+    var key = votedKey(b.dataset.id, fb.dataset.claim);
+    try { if (localStorage.getItem(key)) return; } catch (_) {}
+    fetch('/r/' + encodeURIComponent(b.dataset.id) + '/claim/' + fb.dataset.claim + '/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vote: btn.dataset.vote })
+    }).then(function (r) { return r.json(); }).then(function (counts) {
+      try { localStorage.setItem(key, btn.dataset.vote); } catch (_) {}
+      fb.querySelector('[data-vote="up"] span').textContent = counts.up || '';
+      fb.querySelector('[data-vote="down"] span').textContent = counts.down || '';
+      markVotes(fb.parentElement);
+      var thanks = fb.querySelector('.thanks') || fb.appendChild(document.createElement('span'));
+      thanks.className = 'thanks';
+      thanks.textContent = 'Thanks, noted.';
+    });
+  });
+  markVotes(document);
+  document.addEventListener('cc:refreshed', function () { markVotes(document); }, true);
+
   var body = document.getElementById('report-body');
   if (!body || body.dataset.status !== 'running') return;
   var rid = body.dataset.id;

@@ -47,5 +47,13 @@
         · {{ s.tier }}{% if s.date %} · {{ s.date }}{% endif %}{% if s.kind == 'pdf' %} · PDF{% endif %}</li>{% endfor %}</ul>
     </details>
   {% endif %}
+  {% if c.verdict not in ('pending',) %}
+    {% set fb = (feedback | default({})).get(c.id, {}) %}
+    <div class="fb noprint" data-claim="{{ c.id }}">
+      <span>Was this verdict right?</span>
+      <button type="button" class="fbtn" data-vote="up" aria-label="Yes, the verdict is right">👍 <span>{{ fb.up or '' }}</span></button>
+      <button type="button" class="fbtn" data-vote="down" aria-label="No, the verdict is wrong">👎 <span>{{ fb.down or '' }}</span></button>
+    </div>
+  {% endif %}
   {% if c.dropped_self %}<p class="note">{{ c.dropped_self }} search result{{ 's' if c.dropped_self > 1 }} came from the article's own site and {{ 'were' if c.dropped_self > 1 else 'was' }} not used.</p>{% endif %}
 </li>

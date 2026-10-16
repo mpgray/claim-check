@@ -1,5 +1,16 @@
 {% extends 'base.html' %}
 {% block title %}{{ r.title or r.url }} · Claim Check{% endblock %}
+{% block head %}
+  {% set desc = r.counts.get('supported', 0) ~ ' supported, ' ~ r.counts.get('contradicted', 0) ~ ' contradicted, '
+               ~ r.counts.get('outdated', 0) ~ ' outdated, ' ~ r.counts.get('unverified', 0) ~ ' unverified. Every verdict comes with a receipt.' %}
+  <meta name="description" content="{{ desc }}">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Claim Check: {{ r.title or r.url }}">
+  <meta property="og:description" content="{{ desc }}">
+  <meta property="og:url" content="{{ url_for('report', rid=rid, _external=True) }}">
+  {% if share_image %}<meta property="og:image" content="{{ share_image }}">
+  <meta name="twitter:card" content="summary_large_image">{% endif %}
+{% endblock %}
 {% block main %}
 <p class="back"><a href="/">← Check another</a></p>
 <header class="rhead">
@@ -11,6 +22,8 @@
     <button type="button" class="linkish" data-copy="{{ url_for('report', rid=rid, _external=True) }}">Copy link</button>
     <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Re-check</a>
     <a href="{{ url_for('api_report', rid=rid) }}">JSON</a>
+    {% if r.status == 'done' %}<a href="{{ url_for('report_pdf', rid=rid) }}" class="noprint">Download PDF</a>{% endif %}
+    {% if previous %}<a href="{{ url_for('report_compare', rid=rid, old=previous.id) }}">Compare with the check from <time data-ts="{{ previous.created_at }}"></time></a>{% endif %}
   </p>
   {% if cached %}<p class="note">This article was checked recently, so this is that report. <a href="{{ url_for('check', url=meta.url, fresh=1) }}">Check it again</a>.</p>{% endif %}
   <p id="progress" class="progress" aria-live="polite" {% if r.status != 'running' %}hidden{% endif %}></p>
@@ -18,6 +31,7 @@
 <div id="report-body" data-id="{{ rid }}" data-status="{{ r.status }}">
 {% include '_body.html' %}
 </div>
+{% if printing %}<script>document.querySelectorAll('details').forEach(function (d) { d.open = true; });</script>{% endif %}
 <script src="{{ url_for('static', filename='report.js') }}" defer></script>
 <script src="{{ url_for('static', filename='viewer.js') }}" defer></script>
 {% endblock %}

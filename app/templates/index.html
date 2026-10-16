@@ -16,6 +16,9 @@
   {% if fake %}<p class="note">Running without a model: the offline checker
      matches figures literally. Set <code>CC_OPENROUTER_API_KEY</code> (or
      <code>CC_LLM_BASE_URL</code> and <code>CC_LLM_MODEL</code>) for real checks.</p>{% endif %}
+  <p class="note bookmarklet">Check any page you are reading: drag
+    <a href="javascript:location.href='{{ url_for('check', _external=True) }}?url='+encodeURIComponent(location.href)" onclick="return false">Claim Check this page</a>
+    to your bookmarks bar.</p>
 </section>
 {% if recent %}
 <section class="recent">

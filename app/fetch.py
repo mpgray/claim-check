@@ -38,7 +38,7 @@ class Page:
     date: str = ''               # declared in the page's markup (app.dates), or ''
     kind: str = 'html'           # html | text | pdf
     all_passages: list[str] = field(default_factory=list)   # every visible block
-    link_context: list[tuple[str, str]] = field(default_factory=list)  # (href, its passage)
+    link_context: list[tuple[str, str, int]] = field(default_factory=list)  # (href, its passage, offset in it)
     back_matter_chars: int = 0   # reference lists, "see also" etc. not part of the body
 
     @property
@@ -62,8 +62,12 @@ class _PassageParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.passages: list[str] = []
         self.title = ''
-        self.links: list[tuple[str, str]] = []
-        self._pending: list[str] = []
+        self.links: list[tuple[str, str, int]] = []
+        # Links inside elements that have an id, so an in-page footnote link
+        # ("#cite_note-12") can be followed to the citations it points at.
+        self.id_links: dict[str, list[str]] = {}
+        self._ids: list[list] = []      # [id, tag, depth of that tag]
+        self._pending: list[tuple[str, int]] = []
         self._parts: list[str] = []
         self._title_parts: list[str] = []
         self._in_title = False
@@ -75,10 +79,31 @@ class _PassageParser(HTMLParser):
             self.passages.append(passage)
         # A link belongs to the passage it sits in; that is how a citation is
         # tied to the sentence it supports, and how chrome links are told apart.
-        self.links += [(href, passage) for href in self._pending]
+        self.links += [(href, passage, offset) for href, offset in self._pending]
         self._pending, self._parts = [], []
 
+    _VOID = {'br', 'img', 'hr', 'input', 'meta', 'link', 'wbr', 'source', 'area', 'col'}
+
+    def _track_ids(self, tag, attrs):
+        for entry in self._ids:
+            if entry[1] == tag:
+                entry[2] += 1
+        ident = dict(attrs).get('id')
+        if ident and tag not in self._VOID:
+            self._ids.append([ident, tag, 1])
+        href = dict(attrs).get('href') if tag == 'a' else None
+        if href:
+            for entry in self._ids:
+                self.id_links.setdefault(entry[0], []).append(href)
+
+    def _untrack_ids(self, tag):
+        for entry in self._ids:
+            if entry[1] == tag:
+                entry[2] -= 1
+        self._ids = [e for e in self._ids if e[2] > 0]
+
     def handle_starttag(self, tag, attrs):
+        self._track_ids(tag, attrs)
         if tag == 'title':
             self._in_title = True
         elif tag in self._SKIP:
@@ -89,9 +114,12 @@ class _PassageParser(HTMLParser):
         if tag == 'a' and not self._skip_depth:
             href = dict(attrs).get('href')
             if href:
-                self._pending.append(href)
+                # Where in the passage the link sits: a footnote right after a
+                # sentence cites that sentence, not the whole paragraph.
+                self._pending.append((href, len(' '.join(''.join(self._parts).split()))))
 
     def handle_endtag(self, tag):
+        self._untrack_ids(tag)
         if tag == 'title':
             self.title = ' '.join(''.join(self._title_parts).split())
             self._in_title = False
@@ -112,6 +140,20 @@ MIN_READABLE_CHARS = 200
 
 def _norm(text: str) -> str:
     return ' '.join(str(text).split()).lower()
+
+
+def follow_footnote(ident: str, id_links: dict[str, list[str]], hops: int = 2) -> list[str]:
+    """External links a footnote points at, following in-page links up to
+    `hops` deep (Wikipedia: [12] -> the note -> the "Smith 2004" source)."""
+    out: list[str] = []
+    for href in id_links.get(ident, []):
+        if href.startswith('#'):
+            if hops > 1:
+                out += follow_footnote(href[1:], id_links, hops - 1)
+        elif href.startswith(('http://', 'https://', '//')):
+            out.append('https:' + href if href.startswith('//') else href)
+    seen: set = set()
+    return [h for h in out if not (h in seen or seen.add(h))]
 
 
 def readable_passages(html: str) -> list[str]:
@@ -152,7 +194,7 @@ class Parsed:
     passages: list[str]
     all_passages: list[str]
     links: list[str]                       # hrefs inside the readable body
-    link_context: list[tuple[str, str]]
+    link_context: list[tuple[str, str, int]]
     back_matter_chars: int = 0             # reference lists etc. cut from the body
 
 
@@ -165,9 +207,16 @@ def parse_document(html: str) -> Parsed:
     body = _norm(' '.join(readable))
     # Keep a link only if the passage it sits in is part of the readable body:
     # this is what drops "related stories" rails and footer link farms.
-    context = [(href, passage) for href, passage in parser.links
-               if passage and _norm(passage)[:160] in body]
-    return Parsed(parser.title, readable, every, [h for h, _ in context], context,
+    context = []
+    for href, passage, offset in parser.links:
+        if not passage or _norm(passage)[:160] not in body:
+            continue
+        if href.startswith('#'):
+            # A footnote marker: the citation is in the reference list.
+            context += [(h, passage, offset) for h in follow_footnote(href[1:], parser.id_links)]
+        else:
+            context.append((href, passage, offset))
+    return Parsed(parser.title, readable, every, [h for h, _, _ in context], context,
                   sum(len(p) for p in back))
 
 

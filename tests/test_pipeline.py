@@ -25,8 +25,10 @@ def fake_fetch(url):
     pages = {ARTICLE_URL: ARTICLE_HTML, SOURCE_URL: SOURCE_HTML}
     if url not in pages:
         raise FetchError('HTTP 404')
-    title, passages, links = parse_html(pages[url])
-    return Page(url, title, passages, links)
+    from app.fetch import parse_document
+    doc = parse_document(pages[url])
+    return Page(url, doc.title, doc.passages, doc.links, all_passages=doc.all_passages,
+                link_context=doc.link_context)
 
 
 class FakeSearch:
@@ -184,3 +186,34 @@ def test_sources_of_record_are_read_first():
     report = checker.run(ARTICLE_URL)
     wage = next(c for c in report.claims if '7.25' in c.span)
     assert wage.sources[0]['url'] == SOURCE_URL and wage.sources[0]['tier'] == 'official'
+
+
+def test_feedback_compare_sources_and_citation_audit(checker, tmp_path):
+    client = _app(checker, tmp_path).test_client()
+    first = client.get('/check', query_string={'url': ARTICLE_URL}).location.rsplit('/', 1)[-1]
+    second = client.get('/check', query_string={'url': ARTICLE_URL, 'fresh': 1}).location.rsplit('/', 1)[-1]
+    # Feedback is counted per claim and exported with the claim it was about.
+    assert client.post(f'/r/{second}/claim/1/feedback', json={'vote': 'up'}).get_json() == {'up': 1, 'down': 0}
+    assert client.post(f'/r/{second}/claim/1/feedback', json={'vote': 'maybe'}).status_code == 400
+    exported = client.get('/api/feedback').get_json()
+    assert exported[0]['vote'] == 'up' and exported[0]['span']
+    # The newer report links to the comparison with the older one.
+    page = client.get(f'/r/{second}').get_data(as_text=True)
+    assert f'/r/{second}/compare/{first}' in page and 'og:description' in page
+    cmp = client.get(f'/r/{second}/compare/{first}').get_data(as_text=True)
+    assert 'What changed' in cmp and 'unchanged' in cmp
+    assert 'Official' in client.get('/sources').get_data(as_text=True)
+    # The wage claim's own citation (the DOL link in its passage) is audited.
+    data = client.get(f'/api/r/{second}').get_json()
+    wage = next(c for c in data['claims'] if '7.25' in c['span'])
+    assert wage['citations'] == [{'url': SOURCE_URL, 'status': 'supports', 'tier': 'official'}]
+
+
+def test_a_footnote_cites_the_sentence_it_follows_not_the_whole_paragraph():
+    from app.claims import Claim
+    passage = 'First claim about tours is here.[1] Second claim about tickets is here.[2]'
+    checker = Checker(Config(), FakeLLM(), FakeSearch(), fetch=fake_fetch)
+    checker._link_context = [('https://a.example/1', passage, 32), ('https://b.example/2', passage, 72)]
+    cited = ['https://a.example/1', 'https://b.example/2']
+    second = Claim(id=2, span='Second claim about tickets is here.', kind='other')
+    assert checker._own_citations(second, cited) == ['https://b.example/2']

@@ -104,11 +104,12 @@ OFFICIAL_SUFFIXES = [re.compile(p) for p in (
     r'\.gov$', r'\.mil$', r'\.int$', r'\.fed\.us$', r'\.(?:gov|gob|gouv|govt|go|gv)\.[a-z]{2}$',
     r'(?:^|\.)gc\.ca$', r'(?:^|\.)europa\.eu$', r'(?:^|\.)admin\.ch$', r'(?:^|\.)bund\.de$',
     r'(?:^|\.)gouv\.fr$', r'(?:^|\.)overheid\.nl$', r'(?:^|\.)parliament\.uk$')]
+# Intergovernmental bodies and central banks, then bodies of record (from RECORD_START).
 OFFICIAL_DOMAINS = [
     'un.org', 'worldbank.org', 'imf.org', 'oecd.org', 'wto.org', 'bis.org', 'ecb.europa.eu',
     'federalreserve.gov', 'stlouisfed.org', 'minneapolisfed.org', 'newyorkfed.org',
     'riaa.com', 'bpi.co.uk', 'ifpi.org', 'officialcharts.com', 'billboard.com', 'grammy.com',
-    'oscars.org', 'nobelprize.org', 'olympics.com', 'fifa.com', 'sec.report',
+    'oscars.org', 'nobelprize.org', 'olympics.com', 'fifa.com',
 ]
 # reference: curated secondary sources with editorial standards: encyclopedias,
 # universities and journals, wire services and papers of record, fact-checkers,
@@ -128,6 +129,7 @@ REFERENCE_DOMAINS = [
     'rollingstone.com', 'variety.com', 'hollywoodreporter.com', 'pollstar.com', 'allmusic.com',
     'boxofficemojo.com', 'the-numbers.com', 'espn.com',
 ]
+RECORD_START = OFFICIAL_DOMAINS.index('riaa.com')
 TIER_RANK = {'official': 0, 'reference': 1, 'open': 2}
 
 

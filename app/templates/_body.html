@@ -56,6 +56,24 @@
 {% endfor %}
 </ol>
 
+{% set cited = r.claims | selectattr('citations') | list %}
+{% if cited %}
+<section class="citations">
+  <h2>What the article's own citations say</h2>
+  <p>Links that sit in the same passage as a claim, and what reading them showed.</p>
+  <ul>
+  {% for c in cited %}{% for k in c.citations %}
+    <li><a href="#claim-{{ c.id }}">#{{ c.id }}</a>
+      <a href="{{ k.url }}" rel="noopener" target="_blank">{{ k.url.split('/')[2] }}</a>
+      <span class="cite cite-{{ k.status }}">{{ {'supports': 'supports the claim', 'contradicts': 'contradicts the claim',
+        'outdated': 'shows it is outdated', 'read': 'read, but did not settle it',
+        'unread': 'not read (unreadable or past the source limit)'}[k.status] }}</span>
+      {% if k.tier %}<span class="rmeta">{{ k.tier }}</span>{% endif %}</li>
+  {% endfor %}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if r.missed %}
 <section class="missed">
   <h2>Figures not checked</h2>

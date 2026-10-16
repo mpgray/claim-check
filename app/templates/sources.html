@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}How sources are ranked · Claim Check{% endblock %}
+{% block main %}
+<h1>How sources are ranked</h1>
+<p>Every receipt records what kind of site it came from. The tier is decided by
+the site's address alone, never by the model, and it does not change a verdict:
+a receipt from any tier must still quote the page word for word. When search
+returns several sources, official and reference sources are read first.</p>
+
+<h2>Official</h2>
+<p>Writes the rule or publishes the figure.</p>
+<ul>
+  <li>Government addresses everywhere: <code>.gov</code>, <code>.mil</code>, <code>.gov.uk</code>, <code>.gc.ca</code>, <code>.gouv.fr</code>, <code>.gob.mx</code>, <code>.go.jp</code> and similar.</li>
+  <li>Intergovernmental bodies (<code>.int</code>, the UN, World Bank, IMF, OECD) and central banks.</li>
+  <li>Bodies of record for charts, certifications and awards: {{ s.OFFICIAL_DOMAINS[s.RECORD_START:] | join(', ') }}.</li>
+  {% if cfg.official_domains %}<li>Added for this server: {{ cfg.official_domains | join(', ') }}.</li>{% endif %}
+</ul>
+
+<h2>Reference</h2>
+<p>Curated secondary sources with editorial standards.</p>
+<ul>
+  <li>Universities: <code>.edu</code>, <code>.ac.uk</code> and similar.</li>
+  <li>{{ s.REFERENCE_DOMAINS | join(', ') }}.</li>
+  {% if cfg.reference_domains %}<li>Added for this server: {{ cfg.reference_domains | join(', ') }}.</li>{% endif %}
+</ul>
+{% if not cfg.default_tiers %}<p class="notice">The built-in lists are turned off on this server (<code>CC_DEFAULT_TIERS=0</code>); only the added domains count.</p>{% endif %}
+
+<h2>Open</h2>
+<p>Everything else. An open source can still be a receipt; the tier tells you
+how much weight a reader might give it.</p>
+
+<h2>Computed checks</h2>
+<p>Inflation conversions ("equivalent to $104 in 2025") are not looked up;
+code computes them from the Bureau of Labor Statistics CPI-U annual averages.</p>
+{% endblock %}

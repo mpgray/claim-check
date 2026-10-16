@@ -104,6 +104,24 @@ def _noop(kind, report, data):
     pass
 
 
+def audit_citations(cites: list[str], sources: list[dict], receipt: dict | None,
+                    verdict: str) -> list[dict]:
+    """What each link in the claim's own passage turned out to say. No extra
+    model calls: it is read from what judging already did."""
+    out = []
+    for url in cites:
+        src = next((s for s in sources if url in (s.get('requested'), s['url'])), None)
+        if receipt and src and receipt.get('url') == src['url']:
+            status = {'supported': 'supports', 'contradicted': 'contradicts',
+                      'outdated': 'outdated'}.get(verdict, 'read')
+        elif src:
+            status = 'read'          # read, but not what settled the claim
+        else:
+            status = 'unread'        # unreadable, or past the source limit
+        out.append({'url': url, 'status': status, 'tier': src['tier'] if src else ''})
+    return out
+
+
 def merge_inflation(check: dict, verdict: str, reason: str, receipt: dict | None):
     """Fold a computed inflation check into the judge's verdict.
 
@@ -138,7 +156,7 @@ class Checker:
         # Held while a claim's result is written and while an event handler
         # reads the report, so a saved report never has half a verdict.
         self.lock = threading.RLock()
-        self._link_context: list[tuple[str, str]] = []
+        self._link_context: list[tuple[str, str, int]] = []
         self.search_error = ''
 
     def _page(self, url: str) -> Page | None:
@@ -181,8 +199,8 @@ class Checker:
         report.url, report.title, report.passages, report.date = page.url, page.title, read, page.date
         report.back_matter_chars = getattr(page, 'back_matter_chars', 0)
         report.cited_links = _cited_links(page.links, page.url)
-        self._link_context = [(urljoin(page.url, h).split('#', 1)[0], ctx)
-                              for h, ctx in page.link_context]
+        self._link_context = [(urljoin(page.url, h).split('#', 1)[0], ctx, off)
+                              for h, ctx, off in page.link_context]
         emit('fetched', report, {'title': page.title})
 
         raw = self._extract(chunks, report)
@@ -251,10 +269,39 @@ class Checker:
         return out
 
     def _own_citations(self, claim: claims_mod.Claim, cited: list[str]) -> list[str]:
-        """Links in the very passage the claim sits in: does the citation say that?"""
+        """Links the article attaches to this claim: does the citation say that?
+
+        Footnotes right after the claim's words come first, then links inside
+        them. If there are neither, the next footnote cluster after the claim
+        (a footnote covers the sentences before it), else every link in the
+        claim's passage.
+        """
         span = claims_mod.norm(claim.span)
-        return [u for u, ctx in self._link_context
-                if u in cited and span and span[:120] in claims_mod.norm(ctx)]
+        if not span:
+            return []
+        after, inside, later, passage = [], [], [], []
+        for url, ctx, off in self._link_context:
+            if url not in cited:
+                continue
+            flat = claims_mod.norm(ctx)
+            at = flat.find(span[:120])
+            if at < 0:
+                continue
+            end = at + len(span)
+            if end - 2 <= off <= end + 60:
+                after.append(url)
+            elif at <= off < end:
+                inside.append(url)
+            elif off > end:
+                later.append((off, url))
+            else:
+                passage.append(url)
+        if later:
+            first = min(o for o, _ in later)
+            later = [u for o, u in sorted(later) if o <= first + 60]
+        ordered = after + inside or later or passage
+        seen: set = set()
+        return [u for u in ordered if not (u in seen or seen.add(u))]
 
     def _tier(self, url: str) -> str:
         return tier(url, self.cfg.official_domains, self.cfg.reference_domains,
@@ -298,10 +345,13 @@ class Checker:
         verdict, reason, receipt, sources = self._decide(claim, report, value)
         if check:
             verdict, reason, receipt = merge_inflation(check, verdict, reason, receipt)
+        citations = audit_citations(self._own_citations(claim, report.cited_links),
+                                    sources, receipt, verdict)
         with self.lock:
             claim.sources, claim.receipt = sources, receipt
             claim.verdict, claim.reason = verdict, reason
             claim.checks = [check] if check else []
+            claim.citations = citations
 
     def _inflation(self, claim: claims_mod.Claim, report: Report) -> tuple[dict | None, str | None]:
         """(computed check, value to judge instead) for a claim with an
@@ -340,11 +390,11 @@ class Checker:
                 continue
             pages[page.url] = page.text
             dates[page.url] = page.date
-            sources.append({'url': page.url, 'title': page.title, 'date': page.date,
+            sources.append({'url': page.url, 'requested': url, 'title': page.title, 'date': page.date,
                             'kind': page.kind,
                             'text': focused_excerpt(page.source_passages, claim.span),
                             'tier': self._tier(page.url)})
-        listed = [{k: s[k] for k in ('url', 'title', 'tier', 'date', 'kind')} for s in sources]
+        listed = [{k: s[k] for k in ('url', 'requested', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
             return 'unverified', 'No readable source was found.', None, listed
         try:

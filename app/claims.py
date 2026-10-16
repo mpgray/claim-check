@@ -48,6 +48,7 @@ class Claim:
     dropped_self: int = 0    # search results that were the article's own site
     snapshot: dict | None = None
     checks: list[dict] = field(default_factory=list)   # computed by code (app.inflation)
+    citations: list[dict] = field(default_factory=list)  # links in the claim's own passage, and what they said
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:

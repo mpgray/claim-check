@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}What changed · {{ new.title or new.url }} · Claim Check{% endblock %}
+{% block main %}
+<p class="back"><a href="{{ url_for('report', rid=rid) }}">← Back to the report</a></p>
+<h1>What changed</h1>
+<p class="src"><a href="{{ new.url }}" rel="noopener" target="_blank">{{ new.title or new.url }}</a></p>
+<p class="meta">Check from <a href="{{ url_for('report', rid=old_id) }}"><time data-ts="{{ old_meta.created_at }}"></time></a>
+  compared with <a href="{{ url_for('report', rid=rid) }}"><time data-ts="{{ new_meta.created_at }}"></time></a>.
+  {% if old.date != new.date %}The article's date changed from {{ old.date or 'unknown' }} to {{ new.date or 'unknown' }}.{% endif %}</p>
+
+<section class="summary cmp" aria-label="Summary">
+  <div class="stat"><span class="n">{{ diff.changed | length }}</span><span class="l">verdict changed</span></div>
+  <div class="stat"><span class="n">{{ diff.same | length }}</span><span class="l">unchanged</span></div>
+  <div class="stat"><span class="n">{{ diff.added | length }}</span><span class="l">newly checked</span></div>
+  <div class="stat"><span class="n">{{ diff.dropped | length }}</span><span class="l">no longer checked</span></div>
+</section>
+
+{% if diff.changed %}<h2>Verdict changed</h2>
+<ol class="claims">{% for a, b in diff.changed %}
+  <li class="claim v-{{ b.verdict }}"><div class="head"><span class="badge">{{ a.verdict }} → {{ b.verdict }}</span></div>
+    <blockquote class="span">{{ b.span }}</blockquote>
+    <p class="reason"><strong>Before:</strong> {{ a.reason }}</p>
+    <p class="reason"><strong>Now:</strong> {{ b.reason }}</p></li>
+{% endfor %}</ol>{% endif %}
+
+{% if diff.added %}<h2>Newly checked</h2>
+<ol class="claims">{% for c in diff.added %}
+  <li class="claim v-{{ c.verdict }}"><div class="head"><span class="badge">{{ c.verdict }}</span></div>
+    <blockquote class="span">{{ c.span }}</blockquote></li>
+{% endfor %}</ol>{% endif %}
+
+{% if diff.dropped %}<h2>No longer checked</h2>
+<p class="note">The extractor did not pick these again, or the article no longer says them.</p>
+<ol class="claims">{% for c in diff.dropped %}
+  <li class="claim v-{{ c.verdict }}"><div class="head"><span class="badge">was {{ c.verdict }}</span></div>
+    <blockquote class="span">{{ c.span }}</blockquote></li>
+{% endfor %}</ol>{% endif %}
+
+{% if diff.same %}<details><summary>Unchanged ({{ diff.same | length }})</summary>
+<ul>{% for a, b in diff.same %}<li>{{ b.verdict }}: {{ b.span }}</li>{% endfor %}</ul></details>{% endif %}
+<script src="{{ url_for('static', filename='report.js') }}" defer></script>
+{% endblock %}

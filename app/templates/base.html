@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Claim Check{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block head %}{% endblock %}
 </head>
-<body>
+<body{% if printing %} class="print"{% endif %}>
   <header class="top"><a href="/" class="brand">Claim Check</a>
-    <span class="tag">Every verdict comes with a receipt.</span></header>
+    <span class="tag">Every verdict comes with a receipt.</span>
+    <a class="toplink" href="{{ url_for('sources_page') }}">How sources are ranked</a></header>
   <main>{% block main %}{% endblock %}</main>
 </body>
 </html>

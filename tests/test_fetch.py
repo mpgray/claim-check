@@ -82,3 +82,20 @@ def test_reference_lists_are_cut_from_the_body_but_not_from_the_top():
     # A "Notes" box in the first 30% of the page is not the end of the article.
     kept, back = split_back_matter(['Notes'] + body)
     assert back == []
+
+
+def test_wikipedia_footnotes_are_followed_to_their_citations():
+    from app.fetch import parse_document
+    html = """<html><body><article>
+<p>He played 96 concerts; the average ticket price for a show was US$61 that year, a record for him.<sup><a href="#cite_note-12">[12]</a></sup></p>
+<p>Some other paragraph that is long enough to count as part of the readable body text here.</p>
+<p>Another paragraph that is also long enough to count as article text for the parser to keep.</p>
+</article>
+<h2>References</h2><ol>
+<li id="cite_note-12"><a href="#cite_ref-12">^</a> <a class="external" href="https://www.csmonitor.com/2005/x">"Prince tops touring"</a>; see <a href="#CITEREFSmith2004">Smith 2004</a></li>
+</ol>
+<ul><li><cite id="CITEREFSmith2004">Smith, J. <a href="https://books.example/smith">Touring</a></cite></li></ul>
+</body></html>"""
+    doc = parse_document(html)
+    urls = [u for u, ctx, _ in doc.link_context if ctx.startswith('He played 96 concerts')]
+    assert urls == ['https://www.csmonitor.com/2005/x', 'https://books.example/smith']
