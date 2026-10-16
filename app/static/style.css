@@ -86,3 +86,30 @@ details summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
 .recent time, .st { color: var(--muted); font-size: .8rem; }
 .st-error { color: var(--bad); } .st-running { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* Snapshot viewer */
+.viewer { width: min(1100px, 96vw); height: 92vh; max-height: 92vh; padding: 0; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--text); display: none; flex-direction: column; overflow: hidden; }
+.viewer[open] { display: flex; }
+.viewer::backdrop { background: rgba(0, 0, 0, .55); }
+.vhead { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; justify-content: space-between; padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
+.vnav { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.vbtn { padding: .35rem .7rem; font-size: .85rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.vbtn:hover { border-color: var(--accent); }
+.vcount { font-size: .85rem; color: var(--muted); min-width: 4.5rem; text-align: center; }
+.vinfo { display: flex; gap: .6rem; align-items: baseline; padding: .5rem .8rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
+.vinfo .vspan { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.vinfo .badge.v-supported { color: var(--ok); } .vinfo .badge.v-contradicted { color: var(--bad); }
+.vinfo .badge.v-outdated { color: var(--old); } .vinfo .badge.v-unverified, .vinfo .badge.v-opinion { color: var(--unk); }
+.vbody { flex: 1; overflow: auto; background: #e9e8e4; }
+.vpage { position: relative; margin: 0 auto; background: #fff; }
+.vpage img { position: absolute; left: 0; display: block; }
+.vmark { position: absolute; padding: 0; background: transparent; border: 3px solid var(--unk); border-radius: 4px; cursor: pointer; }
+.vmark.v-supported { border-color: #1f9d55; } .vmark.v-contradicted { border-color: #d93025; }
+.vmark.v-outdated { border-color: #e08600; } .vmark.v-quote, .vmark.v-pending { border-color: #b08900; }
+.vmark .vtag { position: absolute; top: -1.35rem; left: -3px; padding: 0 .35rem; font-size: .72rem; font-weight: 700; color: #fff;
+  background: inherit; border-radius: 4px 4px 0 0; background-color: #555; }
+.vmark.v-supported .vtag { background-color: #1f9d55; } .vmark.v-contradicted .vtag { background-color: #d93025; }
+.vmark.v-outdated .vtag { background-color: #e08600; }
+.vmark.on { box-shadow: 0 0 0 4px rgba(43, 95, 217, .55); border-width: 4px; }
+.thumb[data-view] { cursor: zoom-in; }

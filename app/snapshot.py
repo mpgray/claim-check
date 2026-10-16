@@ -34,7 +34,9 @@ COLOURS = {
     'quote': 'rgba(255, 214, 10, .60)',
 }
 VIEWPORT = {'width': 1280, 'height': 900}
-MAX_IMAGE_HEIGHT = 12_000     # under Chromium's texture limit; taller pages get a window
+TILE_HEIGHT = 4_000           # the full page is saved as stacked JPEG tiles of this height
+MAX_PAGE_HEIGHT = 150_000     # pages taller than this are captured to this depth
+TILE_QUALITY = 72
 NAV_TIMEOUT_MS = 20_000
 TOTAL_TIMEOUT_S = 150
 PAGE_TIMEOUT_S = 60
@@ -156,35 +158,58 @@ class Snapshotter:
         return marks
 
     @staticmethod
-    async def _full(page, rects: list[dict], path: Path) -> bool:
-        """Full-page PNG. Returns True if the page was too tall and only the
-        window around the highlights was captured.
+    async def _tiles(page, prefix: str, out: Path) -> dict:
+        """The whole page as stacked JPEG tiles, plus every highlight's
+        position on it, for the report's snapshot viewer.
 
-        The viewport is resized to the capture window and screenshotted, not
+        The viewport is resized to one tile and scrolled, not
         `full_page=True`: on a 70,000 px page that call re-lays out the whole
-        document and takes ~30 s. Run this after the crops, since it moves
-        the viewport.
+        document per shot and takes ~30 s. Highlights are re-measured at the
+        tile viewport, since a taller viewport can move things (100vh heroes).
+        Run after the crops: this changes the viewport.
         """
-        height = int(await page.evaluate('window.__cc.height()'))
-        top, size = 0, min(height, MAX_IMAGE_HEIGHT)
-        if height > MAX_IMAGE_HEIGHT and rects:
-            lo = min(r['y'] for r in rects)
-            hi = max(r['y'] + r['h'] for r in rects)
-            top = int(max(0, min(lo - 400, (lo + hi) / 2 - MAX_IMAGE_HEIGHT / 2,
-                                 height - MAX_IMAGE_HEIGHT)))
-        await page.set_viewport_size({'width': VIEWPORT['width'], 'height': max(size, 200)})
-        await page.evaluate('y => window.scrollTo(0, y)', top)
-        await page.screenshot(path=str(path))
+        await page.evaluate('window.__cc.focus(null)')
+        width = VIEWPORT['width']
+        await page.set_viewport_size({'width': width, 'height': TILE_HEIGHT})
+        await page.evaluate('window.scrollTo(0, 0)')
+        await page.wait_for_timeout(300)          # let the resize settle
+        full = int(await page.evaluate('window.__cc.height()'))
+        height = min(full, MAX_PAGE_HEIGHT)
+        rects: dict = {}
+        tiles, top, i = [], 0, 0
+        while top < height:
+            actual = await page.evaluate('y => { window.scrollTo(0, y); return window.scrollY; }', top)
+            offset = max(0, top - actual)
+            h = min(TILE_HEIGHT - offset, height - top)
+            if h <= 0:
+                break
+            name = f'{prefix}-t{i}.jpg'
+            await page.screenshot(path=str(out / name), type='jpeg', quality=TILE_QUALITY,
+                                  clip={'x': 0, 'y': offset, 'width': width, 'height': h})
+            # Positions are measured with the tile that shows them: pages that
+            # load more content while scrolling move everything below it.
+            for key, r in (await page.evaluate('window.__cc.rects()')).items():
+                if (key not in rects and r.get('visible') and r['w'] > 0 and r['h'] > 0
+                        and top <= r['y'] < top + h):
+                    rects[key] = r
+            tiles.append({'name': name, 'top': top, 'height': h})
+            top += h
+            i += 1
         await page.set_viewport_size(VIEWPORT)
-        return height > MAX_IMAGE_HEIGHT
+        return {'tiles': tiles, 'width': width, 'height': height, 'partial': full > height,
+                'rects': rects}
 
     @staticmethod
-    async def _crop(page, item_id: str, path: Path) -> bool:
+    async def _crop(page, item_id: str, path: Path) -> str:
         """A crop around one highlight, from the viewport after scrolling to
-        it (fast at any page height). False if it is not on screen."""
+        it (fast at any page height). Returns 'ok', 'hidden' (in the DOM but
+        not what the browser shows: a paywall fold, a clamp, an overlay) or
+        'missing' (no box on screen)."""
         rect = await page.evaluate('id => window.__cc.focus(id)', item_id)
         if not rect or rect['w'] <= 0 or rect['h'] <= 0:
-            return False
+            return 'missing'
+        if not rect.get('visible'):
+            return 'hidden'
         vw = await page.evaluate('document.documentElement.clientWidth') or VIEWPORT['width']
         vh = VIEWPORT['height']
         w = min(vw, max(rect['w'] + 80, 720))
@@ -192,9 +217,9 @@ class Snapshotter:
         y = max(0, rect['y'] - 60)
         h = min(rect['h'] + 120, vh - y)
         if h <= 20 or y >= vh:
-            return False
+            return 'missing'
         await page.screenshot(path=str(path), clip={'x': x, 'y': y, 'width': w, 'height': h})
-        return True
+        return 'ok'
 
     @staticmethod
     def _set(checker, claim, **values):
@@ -233,15 +258,17 @@ class Snapshotter:
                     self._set(checker, c, article_found=False)
                     continue
                 name = f'article-{c.id}.png'
-                if await self._crop(page, f'c{c.id}', out / name):
+                result = await self._crop(page, f'c{c.id}', out / name)
+                if result == 'ok':
                     self._set(checker, c, article_found=True, article_crop=name,
-                              article_full='article.png', article_exact=m.get('exact', True))
+                              article_exact=m.get('exact', True))
                 else:
-                    self._set(checker, c, article_found=False)
-            await page.evaluate('window.__cc.focus(null)')
-            report.snapshot['article_partial'] = await self._full(page, found, out / 'article.png')
-            report.snapshot['article_full'] = 'article.png'
-            report.snapshot['article_found'] = len(found)
+                    self._set(checker, c, article_found=False, article_hidden=result == 'hidden')
+            view = await self._tiles(page, 'article', out)
+            view['rects'] = {k[1:]: v for k, v in view['rects'].items() if k.startswith('c')}
+            report.snapshot['article'] = view
+            report.snapshot['article_found'] = sum(1 for c in report.claims
+                                                   if (c.snapshot or {}).get('article_found'))
         except Exception as exc:
             report.snapshot['article_error'] = f'Article snapshot failed: {exc}'.split('\n')[0][:200]
         finally:
@@ -267,23 +294,24 @@ class Snapshotter:
                         'different page' + (f' ("{title}")' if title else '')
                         + ', so there is no image.'))
                 return
-            full = f'source-{first}.png'
             captured = _now()
             for c in claims:
                 m = marks.get(f'q{c.id}') or {}
-                values = {'source_full': full, 'captured_at': captured,
-                          'source_found': bool(m.get('found'))}
+                values = {'captured_at': captured, 'source_found': bool(m.get('found'))}
                 if m.get('found'):
                     crop = f'source-{c.id}-crop.png'
-                    if await self._crop(page, f'q{c.id}', out / crop):
+                    result = await self._crop(page, f'q{c.id}', out / crop)
+                    if result == 'ok':
                         values['source_crop'] = crop
                     else:
                         values['source_found'] = False
+                        values['source_hidden'] = result == 'hidden'
                 self._set(checker, c, **values)
-            await page.evaluate('window.__cc.focus(null)')
-            partial = await self._full(page, found, out / full)
+            view = await self._tiles(page, f'source-{first}', out)
+            rects = view.pop('rects')
             for c in claims:
-                self._set(checker, c, source_partial=partial)
+                self._set(checker, c, source_view={**view, 'rect': rects.get(f'q{c.id}'),
+                                                   'url': url})
         except Exception as exc:
             for c in claims:
                 self._set(checker, c, source_error=f'Source snapshot failed: {exc}'.split('\n')[0][:200])

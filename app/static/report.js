@@ -44,7 +44,10 @@
     });
   }
   function refreshBody() {
-    return get(base + '/body').then(function (html) { body.innerHTML = html; });
+    return get(base + '/body').then(function (html) {
+      body.innerHTML = html;
+      body.dispatchEvent(new Event('cc:refreshed'));
+    });
   }
   function refreshTitle() {
     return fetch('/api/r/' + encodeURIComponent(rid)).then(function (r) { return r.json(); })

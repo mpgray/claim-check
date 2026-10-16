@@ -8,6 +8,7 @@ Routes
   GET  /r/<id>/body           the report body fragment
   GET  /r/<id>/claim/<n>      one claim card fragment
   GET  /r/<id>/snap/<file>    a snapshot image
+  GET  /r/<id>/view.json      snapshot manifest for the in-page viewer
   GET  /api/r/<id>            the report as JSON
   GET  /api/check?url=        run a check synchronously, JSON (for scripts)
   GET  /healthz
@@ -27,7 +28,7 @@ from app.pipeline import Checker
 from app.search import NoSearch, OpenRouterWebSearch, SearxngSearch
 from app.store import Store
 
-SNAP_NAME = re.compile(r'^[a-z0-9-]+\.png$')
+SNAP_NAME = re.compile(r'^[a-z0-9-]+\.(?:png|jpg)$')
 
 
 def build_checker(cfg: Config) -> Checker:
@@ -127,6 +128,20 @@ def create_app(checker_factory=None, *, store: Store | None = None,
         if not SNAP_NAME.match(name) or not re.fullmatch(r'[A-Za-z0-9]+', rid):
             abort(404)
         return send_from_directory(snap_root / rid, name, max_age=86400)
+
+    @app.get('/r/<rid>/view.json')
+    def view_manifest(rid):
+        r, _ = _loaded(rid)
+        snap = r.snapshot or {}
+        claims = []
+        for c in r.claims:
+            cs = c.snapshot or {}
+            claims.append({'id': c.id, 'verdict': c.verdict, 'span': c.span,
+                           'quote': (c.receipt or {}).get('quote', ''),
+                           'source': cs.get('source_view')})
+        return jsonify({'base': url_for('snap', rid=rid, name='x')[:-1],
+                        'article': snap.get('article'), 'claims': claims,
+                        'captured_at': snap.get('captured_at', ''), 'url': r.url})
 
     @app.get('/api/r/<rid>')
     def api_report(rid):

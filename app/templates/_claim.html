@@ -7,8 +7,10 @@
   </div>
   <blockquote class="span">{{ c.span }}</blockquote>
   {% if snap.article_crop %}
-    <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.article_full or r.snapshot.article_full) }}" target="_blank" title="In the article">
+    <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.article_crop) }}" target="_blank" data-view="article" data-claim="{{ c.id }}" title="Show in the article snapshot">
       <img src="{{ url_for('snap', rid=rid, name=snap.article_crop) }}" alt="The claim highlighted in the article" loading="lazy"></a>
+  {% elif snap.article_hidden %}
+    <p class="note">This sentence is on the rendered article page but hidden (behind a paywall fold, a "read more" button or an overlay), so the snapshot cannot show it.</p>
   {% elif snap.article_found is sameas false %}
     <p class="note">This sentence was in the fetched article but not in the page as a browser renders it, so the snapshot has no highlight for it.</p>
   {% endif %}
@@ -19,11 +21,13 @@
         <a href="{{ c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>
         {% if c.receipt.as_of %}<span class="asof">changed {{ c.receipt.as_of }}</span>{% endif %}</p>
       {% if snap.source_crop %}
-        <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.source_full) }}" target="_blank" title="The source as captured">
+        <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.source_crop) }}" target="_blank" {% if snap.source_view %}data-view="source" data-claim="{{ c.id }}"{% endif %} title="Show on the captured source page">
           <img src="{{ url_for('snap', rid=rid, name=snap.source_crop) }}" alt="The quote highlighted on the source page" loading="lazy"></a>
         <p class="note">Captured {{ snap.captured_at or r.snapshot.captured_at }}. The live link may change; this image will not.</p>
       {% elif c.receipt.kind == 'pdf' %}
         <p class="note">PDF source: the quote was verified in its text; no image is captured.</p>
+      {% elif snap.source_hidden %}
+        <p class="note">The quote was verified in the fetched page, but the rendered page hides it (a paywall fold, a "read more" button or an overlay), so the image cannot show it.</p>
       {% elif snap.source_error %}
         <p class="note">{{ snap.source_error }}</p>
       {% elif snap.source_found is sameas false %}

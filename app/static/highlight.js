@@ -41,7 +41,10 @@
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         var p = n.parentElement;
-        if (!p || SKIP[p.tagName.toUpperCase()] || !n.data.trim()) return NodeFilter.FILTER_REJECT;
+        // Whitespace-only nodes still count as a space: a lone &nbsp; node
+        // between "$56.5" and "million" is how Wikipedia keeps them together,
+        // and String.trim() treats &nbsp; as whitespace.
+        if (!p || SKIP[p.tagName.toUpperCase()] || !n.data.length) return NodeFilter.FILTER_REJECT;
         return visible(p) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
@@ -119,6 +122,24 @@
     return { x: b.left + window.scrollX, y: b.top + window.scrollY, w: b.width, h: b.height };
   }
 
+  // Is this text actually what the browser shows there? A paywall fold, a
+  // "read more" clamp or an overlay leaves the text in the DOM but out of
+  // sight; elementFromPoint sees what is on top. Only rects inside the
+  // current viewport can be tested.
+  function visibleNow(range) {
+    var rs = range.getClientRects(), anc = range.commonAncestorContainer;
+    if (anc.nodeType !== 1) anc = anc.parentElement;
+    for (var i = 0; i < rs.length && i < 6; i++) {
+      var r = rs[i];
+      if (r.width < 1 || r.height < 1) continue;
+      var x = r.left + r.width / 2, y = r.top + r.height / 2;
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) continue;
+      var hit = document.elementFromPoint(x, y);
+      if (hit && (anc.contains(hit) || hit.contains(anc))) return true;
+    }
+    return false;
+  }
+
   var ranges = {};
 
   window.__cc = {
@@ -158,7 +179,7 @@
       var b = r.getBoundingClientRect();
       window.scrollBy(0, b.top - Math.max(60, (window.innerHeight - b.height) / 3));
       b = r.getBoundingClientRect();
-      return { x: b.left, y: b.top, w: b.width, h: b.height };
+      return { x: b.left, y: b.top, w: b.width, h: b.height, visible: visibleNow(r) };
     },
     // Overlays (cookie bars, sticky headers, chat bubbles) cover the text a
     // crop is about; take them out of the picture. Nothing is clicked.
@@ -172,6 +193,16 @@
       document.documentElement.style.setProperty('overflow', 'visible', 'important');
       document.body.style.setProperty('overflow', 'visible', 'important');
       return n;
+    },
+    // Every highlight's current position in page coordinates.
+    rects: function () {
+      var out = {};
+      Object.keys(ranges).forEach(function (id) {
+        var r = pageRect(ranges[id]);
+        r.visible = visibleNow(ranges[id]);
+        out[id] = r;
+      });
+      return out;
     },
     height: function () {
       return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
