@@ -1,6 +1,6 @@
 [project]
 name = "claim-check"
-version = "0.1.0"
+version = "0.2.0"
 description = "Paste an article; every factual claim gets a verdict with a receipt."
 readme = "README.md"
 license = "MIT"
