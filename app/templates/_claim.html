@@ -44,7 +44,7 @@
     </div>
   {% endif %}
   {% if c.correction %}
-    <div class="correction"><p>What the source says <span class="rmeta">every figure and name below is in the receipt</span></p>
+    <div class="correction"><p>What the source says <span class="rmeta">what it changes comes from the receipt; the rest is the article's</span></p>
       <blockquote>{{ c.correction.text }}</blockquote></div>
   {% elif c.rejected_correction and c.rejected_correction.text %}
     <details class="rejected"><summary>Show the correction that was refused</summary>
