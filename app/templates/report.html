@@ -12,7 +12,7 @@
   <meta name="twitter:card" content="summary_large_image">{% endif %}
 {% endblock %}
 {% block main %}
-<p class="back"><a href="/">← Check another</a></p>
+{% if not embed %}<p class="back"><a href="/">← Check another</a></p>{% endif %}
 <header class="rhead">
   <h1 id="rtitle">{{ r.title or ('Reading the article…' if r.status == 'running' else 'Untitled page') }}</h1>
   <p class="src"><a href="{{ r.url }}" rel="noopener" target="_blank">{{ r.url }}</a></p>

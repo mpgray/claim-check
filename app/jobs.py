@@ -15,30 +15,48 @@ SAVE_ON = ('fetched', 'claims', 'claim', 'snapshots', 'done', 'error')
 
 
 class Jobs:
-    def __init__(self, store: Store, checker_factory, *, sync: bool = False):
-        self.store, self.factory, self.sync = store, checker_factory, sync
+    """`deliver(rid, callback_url) -> dict` sends a finished report to the
+    address its check asked for (app.callback); its result is saved on the
+    report."""
+
+    def __init__(self, store: Store, checker_factory, *, sync: bool = False, deliver=None):
+        self.store, self.factory, self.sync, self.deliver = store, checker_factory, sync, deliver
         self._log: dict[str, list[tuple[str, dict]]] = {}
         self._cond = threading.Condition()
 
-    def start(self, url: str) -> str:
+    def start(self, url: str, *, context: dict | None = None, page=None, html: str = '',
+              callback_url: str = '') -> str:
+        """Start a check of `url`, or of `page` (a draft: nothing is fetched;
+        `html` is what its snapshot renders)."""
         rid = self.store.create(url)
         with self._cond:
             self._log[rid] = []
+        args = (rid, url, context, page, html, callback_url)
         if self.sync:
-            self._run(rid, url)
+            self._run(*args)
         else:
-            threading.Thread(target=self._run, args=(rid, url), daemon=True,
+            threading.Thread(target=self._run, args=args, daemon=True,
                              name=f'check-{rid}').start()
         return rid
 
-    def _run(self, rid: str, url: str) -> None:
+    def _run(self, rid: str, url: str, context=None, page=None, html: str = '',
+             callback_url: str = '') -> None:
         try:
-            self.factory().run(url, on_event=lambda k, r, d: self._on(rid, k, r, d), report_id=rid)
+            checker = self.factory()
+            checker.draft_html = html
+            checker.run(url, on_event=lambda k, r, d: self._on(rid, k, r, d), report_id=rid,
+                        context=context, page=page)
         except Exception as exc:  # a crash is a report with an error, not a spinner forever
             loaded = self.store.load(rid)
             report = loaded[0] if loaded else Report(url=url)
             report.status, report.error = 'error', f'The check crashed: {exc}'[:300]
             self._on(rid, 'error', report, {'error': report.error})
+        if callback_url and self.deliver:
+            outcome = self.deliver(rid, callback_url)
+            loaded = self.store.load(rid)
+            if loaded:
+                loaded[0].callback = outcome
+                self.store.save(rid, loaded[0])
 
     def _on(self, rid: str, kind: str, report: Report, data: dict) -> None:
         if kind in SAVE_ON:

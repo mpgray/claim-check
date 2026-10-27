@@ -1,4 +1,4 @@
-"""The two model calls. Both return JSON; code checks everything they return."""
+"""The model calls. All return JSON; code checks everything they return."""
 
 EXTRACT_SYSTEM = """EXTRACT every checkable factual claim from one section of an article.
 
@@ -72,3 +72,19 @@ the adjusted figure.
 Use only the passages below, never memory."""
 
 JUDGE_USER = "ARTICLE DATE: {article_date}\nCLAIM:\n{claim}\nSOURCES:\n{sources}"
+
+# Only for a claim already contradicted or outdated by a verified receipt.
+# `verify.check_correction` refuses any figure or word it adds that the quote
+# does not contain.
+CORRECT_SYSTEM = """REWRITE one sentence so it agrees with its source.
+
+A fact-checker found the sentence contradicted or outdated by the source
+quote below. Return JSON: {"text": ...}
+
+- text: the sentence with the smallest change that makes it agree with the
+  quote: put the quote's figure, date or name where the sentence has the
+  wrong one, and keep every other word. For outdated, say what it is now.
+- Use only figures, dates and names that are in the quote or the sentence.
+- "" if the quote does not say what the sentence should say instead."""
+
+CORRECT_USER = "VERDICT: {verdict}\nSENTENCE: {span}\nSOURCE QUOTE: {quote}\nCHANGED ON: {as_of}"

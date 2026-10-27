@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% block head %}{% endblock %}
 </head>
-<body{% if printing %} class="print"{% endif %}>
-  <header class="top"><a href="/" class="brand">Claim Check</a>
+<body{% if printing %} class="print"{% elif embed %} class="embed"{% endif %}>
+  {% if not embed %}<header class="top"><a href="/" class="brand">Claim Check</a>
     <span class="tag">Every verdict comes with a receipt.</span>
-    <a class="toplink" href="{{ url_for('sources_page') }}">How sources are ranked</a></header>
+    <a class="toplink" href="{{ url_for('sources_page') }}">How sources are ranked</a></header>{% endif %}
   <main>{% block main %}{% endblock %}</main>
 </body>
 </html>

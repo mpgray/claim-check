@@ -23,8 +23,8 @@
     <div class="receipt"><p>Receipt <span class="rmeta">computed · official data</span> {{ c.receipt.quote }}</p></div>
   {% elif c.receipt %}
     <div class="receipt">
-      <p>Receipt <span class="rmeta">{{ c.receipt.tier }}{% if c.receipt.date %} · dated {{ c.receipt.date }}{% endif %}{% if c.receipt.kind == 'pdf' %} · PDF{% endif %}</span>
-        <a href="{{ c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>
+      <p>Receipt <span class="rmeta">{{ c.receipt.tier }}{% if c.receipt.date %} · dated {{ c.receipt.date }}{% endif %}{% if c.receipt.kind == 'pdf' %} · PDF{% elif c.receipt.kind == 'record' %} · record{% if c.receipt.decisive %} · decisive{% endif %}{% endif %}</span>
+        <a href="{{ c.receipt.url if c.receipt.kind == 'record' else c.receipt.link }}" rel="noopener" target="_blank">“{{ c.receipt.quote }}”</a>
         {% if c.receipt.as_of %}<span class="asof">changed {{ c.receipt.as_of }}</span>{% endif %}</p>
       {% if snap.source_crop %}
         <a class="thumb" href="{{ url_for('snap', rid=rid, name=snap.source_crop) }}" target="_blank" {% if snap.source_view %}data-view="source" data-claim="{{ c.id }}"{% endif %} title="Show on the captured source page">
@@ -32,6 +32,8 @@
         <p class="note">Captured {{ snap.captured_at or r.snapshot.captured_at }}. The live link may change; this image will not.</p>
       {% elif c.receipt.kind == 'pdf' %}
         <p class="note">PDF source: the quote was verified in its text; no image is captured.</p>
+      {% elif c.receipt.kind == 'record' %}
+        <p class="note">A record from this server's own data{% if c.receipt.decisive %}, judged first: when a decisive record settles a claim, no web page overrules it{% endif %}. The quote was verified in the record's text.</p>
       {% elif snap.source_hidden %}
         <p class="note">The quote was verified in the fetched page, but the rendered page hides it (a paywall fold, a "read more" button or an overlay), so the image cannot show it.</p>
       {% elif snap.source_error %}
@@ -40,6 +42,13 @@
         <p class="note">The quote is in the page's text but was not found in the rendered page (it may be added by scripts), so the image has no highlight.</p>
       {% endif %}
     </div>
+  {% endif %}
+  {% if c.correction %}
+    <div class="correction"><p>What the source says <span class="rmeta">every figure and name below is in the receipt</span></p>
+      <blockquote>{{ c.correction.text }}</blockquote></div>
+  {% elif c.rejected_correction and c.rejected_correction.text %}
+    <details class="rejected"><summary>Show the correction that was refused</summary>
+      <p>“{{ c.rejected_correction.text }}” — refused: {{ c.rejected_correction.why }}</p></details>
   {% endif %}
   {% if c.rejected_receipt and not c.receipt and c.rejected_receipt.quote %}
     {% set rr = c.rejected_receipt %}
@@ -50,7 +59,7 @@
   {% if c.sources and (not c.receipt or c.sources | length > 1) %}
     <details><summary>Sources read ({{ c.sources | length }})</summary>
       <ul>{% for s in c.sources %}<li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.title or s.url }}</a>
-        · {{ s.tier }}{% if s.date %} · {{ s.date }}{% endif %}{% if s.kind == 'pdf' %} · PDF{% endif %}</li>{% endfor %}</ul>
+        · {{ s.tier }}{% if s.date %} · {{ s.date }}{% endif %}{% if s.kind == 'pdf' %} · PDF{% elif s.kind == 'record' %} · record{% endif %}</li>{% endfor %}</ul>
     </details>
   {% endif %}
   {% if c.verdict not in ('pending',) %}
@@ -63,5 +72,6 @@
   {% endif %}
   {% if c.dropped_offtopic %}<p class="note">{{ c.dropped_offtopic }} search result{{ 's' if c.dropped_offtopic > 1 }} never mentioned {{ r.subject or "the article's subject" }} and {{ 'were' if c.dropped_offtopic > 1 else 'was' }} not used.</p>{% endif %}
   {% if c.dropped_fragmentary %}<p class="note">{{ c.dropped_fragmentary }} source{{ 's' if c.dropped_fragmentary > 1 }} {{ 'were lists' if c.dropped_fragmentary > 1 else 'was a list' }} of fragments (a data or catalogue page) with no sentence to quote, and {{ 'were' if c.dropped_fragmentary > 1 else 'was' }} not used.</p>{% endif %}
+  {% if c.dropped_excluded %}<p class="note">{{ c.dropped_excluded }} result{{ 's' if c.dropped_excluded > 1 }} came from sites this check excludes and {{ 'were' if c.dropped_excluded > 1 else 'was' }} not used.</p>{% endif %}
   {% if c.dropped_self %}<p class="note">{{ c.dropped_self }} search result{{ 's' if c.dropped_self > 1 }} came from the article's own site and {{ 'were' if c.dropped_self > 1 else 'was' }} not used.</p>{% endif %}
 </li>

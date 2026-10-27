@@ -108,7 +108,7 @@ class Snapshotter:
     async def _all(self, context, report, out: Path, checker) -> None:
         by_url: dict[str, list] = {}
         for c in report.claims:
-            if c.receipt and c.receipt.get('kind') not in ('pdf', 'computed'):
+            if c.receipt and c.receipt.get('kind') not in ('pdf', 'computed', 'record'):
                 by_url.setdefault(c.receipt['url'], []).append(c)
         gate = asyncio.Semaphore(PARALLEL_SOURCES)
 
@@ -131,10 +131,10 @@ class Snapshotter:
         # long page must not use up the time the receipts need.
         await asyncio.gather(article(), *(source(u, cs) for u, cs in by_url.items()))
 
-    async def _open(self, context, url: str):
+    async def _open(self, context, url: str, html: str = ''):
         page = await context.new_page()
-        if self.html_for:
-            await page.set_content(self.html_for(url), wait_until='domcontentloaded')
+        if html or self.html_for:
+            await page.set_content(html or self.html_for(url), wait_until='domcontentloaded')
         else:
             await page.goto(url, wait_until='domcontentloaded')
             try:
@@ -233,7 +233,8 @@ class Snapshotter:
         if not report.claims:
             return
         try:
-            page = await self._open(context, report.url)
+            # A draft has no address yet: its own HTML is rendered instead.
+            page = await self._open(context, report.url, getattr(checker, 'draft_html', ''))
         except Exception as exc:
             report.snapshot['article_error'] = f'Could not render the article: {exc}'.split('\n')[0][:200]
             return

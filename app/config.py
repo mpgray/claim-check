@@ -93,3 +93,15 @@ class Config:
     cache_seconds: int = field(default_factory=lambda: int(os.environ.get('CC_CACHE_SECONDS', '3600')))
     # Page snapshots need Playwright's Chromium; off with CC_SNAPSHOTS=0.
     snapshots: bool = field(default_factory=lambda: os.environ.get('CC_SNAPSHOTS', '1') != '0')
+    # Plug-ins (app.plugins): `module:attr` entries, plus the installed
+    # `claim_check.plugins` entry points unless CC_ENTRY_PLUGINS=0.
+    plugins: str = field(default_factory=lambda: os.environ.get('CC_PLUGINS', ''))
+    entry_plugins: bool = field(default_factory=lambda: os.environ.get('CC_ENTRY_PLUGINS', '1') != '0')
+    # Set, every route but /healthz needs it: `Authorization: Bearer <token>`,
+    # or a browser that signed in at /login.
+    api_token: str = field(default_factory=lambda: os.environ.get('CC_API_TOKEN', ''))
+    # Signs the report POSTed to a check's callback_url; no secret, no callbacks.
+    webhook_secret: str = field(default_factory=lambda: os.environ.get('CC_WEBHOOK_SECRET', ''))
+    # Hosts a callback may go to even when they are not public addresses
+    # (a service on your own network). Public hosts are always allowed.
+    callback_hosts: list[str] = field(default_factory=lambda: _list('CC_CALLBACK_HOSTS'))

@@ -83,6 +83,8 @@ class FakeLLM:
     def complete_json(self, system: str, user: str) -> dict:
         if 'EXTRACT' in system:
             return {'claims': _fake_extract(user)}
+        if 'REWRITE' in system:
+            return {'text': ''}
         return _fake_judge(user)
 
 

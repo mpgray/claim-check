@@ -144,4 +144,9 @@ body.print details > * { display: block; }
 .runtime, #elapsed { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .rejected { margin: .35rem 0; padding: .4rem .6rem; border: 1px dashed var(--border); border-radius: calc(var(--radius) - 4px); font-size: .9rem; }
 .rejected p { margin: .3rem 0; }
+.correction { margin: .4rem 0; padding: .5rem .7rem; border-left: 3px solid var(--accent); background: var(--bg); border-radius: calc(var(--radius) - 4px); }
+.correction p { margin: 0 0 .3rem; }
+.correction blockquote { margin: 0; }
+body.embed main { padding-top: .5rem; }
+form.login { max-width: 22rem; margin: 3rem auto; display: grid; gap: .6rem; }
 .limits { font-size: .85rem; color: var(--muted); margin: .4rem 0 0; }

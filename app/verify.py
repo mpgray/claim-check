@@ -147,6 +147,54 @@ def check(claim: Claim, answer: dict, pages: dict[str, str], *,
     return verdict, receipt, reason
 
 
+# Words a minimal correction may add without the receipt saying them.
+_CONNECTIVE = {
+    'the', 'and', 'for', 'was', 'were', 'are', 'has', 'have', 'had', 'been', 'being', 'since',
+    'now', 'not', 'but', 'than', 'its', 'this', 'that', 'these', 'those', 'with', 'from',
+    'into', 'which', 'who', 'only', 'per', 'currently', 'instead', 'then', 'also', 'still',
+    'longer', 'later', 'earlier', 'after', 'before', 'until', 'changed', 'became', 'becomes',
+    'today', 'there', 'their', 'they', 'what'}
+MAX_CORRECTION_GROWTH = 120   # characters a correction may add beyond twice the claim
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w, _, _ in _words(norm(text).replace("'s ", ' '))
+            if len(w) >= 3 and not any(ch.isdigit() for ch in w) and w not in _CONNECTIVE}
+
+
+def check_correction(span: str, text: str, quote: str, as_of: str = '') -> str:
+    """Why a proposed correction of `span` is refused, or '' to keep it.
+
+    A correction is the sentence as its verified receipt would have it. It
+    may only take from the sentence and the receipt: every figure and date it
+    adds must be in the quote (by value), as must every word that carries
+    meaning. Whatever a model knows from memory stays out.
+    """
+    if norm(text) == norm(span):
+        return 'the correction is the sentence unchanged.'
+    if len(text) > 2 * len(span) + MAX_CORRECTION_GROWTH:
+        return 'the correction rewrites far more than the claim.'
+    s_dates, s_numbers, s_years = figures.parse(span)
+    t_dates, t_numbers, t_years = figures.parse(text)
+    q_dates, q_numbers, q_years = figures.parse(f'{quote} {as_of}')
+    added = []
+    for d in t_dates:
+        if d in s_dates:
+            continue
+        if not any(q.year == d.year and q.month == d.month and d.day in (None, q.day) for q in q_dates):
+            added.append(f'{d.year}-{d.month:02d}' + (f'-{d.day:02d}' if d.day else ''))
+    known_years = set(s_years) | {d.year for d in s_dates} | set(q_years) | {d.year for d in q_dates}
+    added += [str(y) for y in t_years if y not in known_years]
+    for n in t_numbers:
+        if not any(n.percent == k.percent and figures._same(n.value, k.value)
+                   for k in s_numbers + q_numbers):
+            added.append(f'{n.value:,.10g}' + ('%' if n.percent else ''))
+    added += sorted(_content_words(text) - _content_words(span) - _content_words(quote))
+    if added:
+        return f"the correction adds {', '.join(added[:4])}, which the receipt does not say."
+    return ''
+
+
 def _frag(text: str) -> str:
     # Text fragments reserve '-', ',' and '&'; quote(safe='') leaves '-' alone.
     return urlquote(text, safe='').replace('-', '%2D')
