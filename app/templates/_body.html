@@ -15,6 +15,9 @@
     </ul>
   </details>
 {% endif %}
+{% if r.plugins %}<p class="notice">Checked with plug-ins: {{ r.plugins | join(', ') }}. Their records are labelled “record”.</p>{% endif %}
+{% if r.plugin_errors %}<p class="error" role="alert">A plug-in failed and was skipped: {{ r.plugin_errors[0] }}{% if r.plugin_errors | length > 1 %} (and {{ r.plugin_errors | length - 1 }} more){% endif %}</p>{% endif %}
+{% if r.context.exclude_domains %}<p class="notice">This check was told never to use {{ r.context.exclude_domains | length }} site{{ 's' if r.context.exclude_domains | length > 1 }} as a source.</p>{% endif %}
 {% if r.extract_errors %}<p class="notice">Part of the article could not be read by the model: {{ r.extract_errors[0] }}</p>{% endif %}
 
 {% if r.claims or r.status != 'running' %}

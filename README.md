@@ -55,7 +55,16 @@ Wikipedia article, from pasting the link to the highlighted snapshots.
   decided by the site's address alone (government sites, universities,
   papers of record and so on). `/sources` explains the rules.
 - **Compare.** See which verdicts changed since the last check of an article.
-- **PDF export, share previews, a bookmarklet, and a JSON API.**
+- **Suggested corrections.** A contradicted or outdated claim gets the
+  sentence as its receipt would have it, kept only if every figure and word
+  it adds is in the receipt. Shown as "what the source says", for a reader
+  of any page; a publisher's tools can turn it into an edit.
+- **Your own data, plugged in.** Records from your own database as sources
+  (decisive if you say so), your own trusted and excluded sites. See
+  [Plug-ins](#plug-ins).
+- **Drafts.** Check an article before it has an address: send its HTML.
+- **PDF export, share previews, a bookmarklet, and a JSON API** with signed
+  callbacks and an optional access token.
 - **Feedback.** Thumbs up or down on any verdict, exported at `/api/feedback`.
 
 ![The snapshot viewer](docs/viewer.jpg)
@@ -100,6 +109,11 @@ shows the limits in effect.
 | `CC_OFFICIAL_DOMAINS`, `CC_REFERENCE_DOMAINS` | | Added to the built-in tiers |
 | `CC_LLM_BASE_URL`, `CC_LLM_API_KEY` | | Any other OpenAI-compatible API |
 | `CC_SEARXNG_URL` | | A self-hosted SearXNG for search |
+| `CC_PLUGINS` | | Plug-ins to load, `module:attr,...` |
+| `CC_ENTRY_PLUGINS` | `1` | `0` ignores installed `claim_check.plugins` entry points |
+| `CC_API_TOKEN` | | Every route but `/healthz` needs it (bearer header or `/login`) |
+| `CC_WEBHOOK_SECRET` | | Signs callbacks; without it callbacks are refused |
+| `CC_CALLBACK_HOSTS` | | Non-public hosts a callback may reach |
 
 Each report records how long each stage took and shows the total in its
 header. A typical 15,000-character article with 25 claims takes about 70
@@ -140,11 +154,56 @@ report: saved, streamed live, shareable
 | Snapshots | `app/snapshot.py`, `app/static/highlight.js` |
 | Reports and live progress | `app/store.py`, `app/jobs.py`, `app/templates/` |
 
+## API
+
+```bash
+# A published article, or a draft (html or text) that has no address yet
+curl -X POST localhost:8050/api/checks -H 'Content-Type: application/json' -d '{
+  "html": "<article>...</article>", "site": "myblog.example", "title": "Draft",
+  "context": {"official_domains": ["agency.gov"], "exclude_domains": ["mysisterblog.example"]},
+  "callback_url": "https://myblog.example/hooks/claim-check"
+}'
+# -> 202 {"id": "...", "api": ".../api/r/<id>", "report": ".../r/<id>", "schema_version": 1}
+```
+
+- `site` is the publisher: never a source, like the article's own site.
+- `context` applies to this check only: `official_domains` and
+  `reference_domains` add to the tiers, `exclude_domains` are never used as
+  sources (your other sites), and `plugin` is passed through to plug-ins.
+- `callback_url` receives the report JSON when the check ends, signed:
+  `X-Claim-Check-Signature: v1=<HMAC-SHA256(CC_WEBHOOK_SECRET, "<timestamp>\n<body>")>`
+  with `X-Claim-Check-Timestamp`. `app.callback.verify` checks one. Without
+  a callback, poll `GET /api/r/<id>` until `status` is `done` or `error`.
+- `GET /r/<id>?embed=1` is the report without the site's header, for an
+  iframe in your own tools.
+- Report JSON carries `schema_version`; it goes up when a field changes
+  meaning or goes away.
+
+## Plug-ins
+
+A plug-in adds what only you have, without forking. It is any Python object
+with some of these methods (`app/plugins.py` documents each):
+
+| Method | What it adds |
+|---|---|
+| `documents(claim, report)` | Records from your own data, as sources. A `decisive` record is judged first and alone; when it settles the claim, no web page overrules it |
+| `leads(claim, report)` | URLs to read before search results |
+| `tier(url)` | Your tier for a site; the best tier any rule gives wins |
+| `excluded(url)` | Sites never to use (your other sites, content farms) |
+| `init_app(app)` | Routes or authentication of your own |
+
+Install it as a `claim_check.plugins` entry point, or name it in
+`CC_PLUGINS=module:attr`. `examples/records_csv/` turns a CSV file into
+decisive records. Records do not loosen the receipt rule: the model must
+quote a record word for word, a figure must be in the quote, and every
+receipt says it came from a record. A report lists the plug-ins that took
+part, and any that failed.
+
 ## Limitations
 
-- **Run it locally or behind your own access control.** The fetcher refuses
-  private and internal addresses, but DNS rebinding is not yet closed and
-  there is no rate limiting. Don't expose it to the open internet as is.
+- **Run it locally or behind your own access control.** `CC_API_TOKEN`
+  locks every route, and the fetcher refuses private and internal addresses,
+  but DNS rebinding is not yet closed and there is no rate limiting.
 - **Model output varies.** Different runs, or different OpenRouter providers,
   can pick somewhat different claims.
 - **Some sites block headless browsers** (Cloudflare) or hide text behind a

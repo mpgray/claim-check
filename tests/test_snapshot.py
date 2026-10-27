@@ -120,3 +120,16 @@ def test_text_folded_under_a_paywall_is_hidden_not_found(tmp_path):
     assert one.snapshot['article_found']
     assert two.snapshot['article_found'] is False and two.snapshot['article_hidden'] is True
     assert '2' not in report.snapshot['article']['rects']
+
+
+@needs_browser
+def test_a_draft_is_rendered_from_its_own_html(tmp_path):
+    """A draft has no address; its snapshot is its own HTML, not a navigation."""
+    class Draft:
+        draft_html = ARTICLE
+        lock = __import__('threading').RLock()
+    report = Report(url='draft:news.example', id='t9', claims=[
+        Claim(id=1, span="Seattle's minimum wage rose to $21.30 an hour.", kind='figure', verdict='unverified')])
+    Snapshotter(tmp_path).capture(report, Draft())
+    assert report.claims[0].snapshot.get('article_found') is True
+    assert 'article_error' not in report.snapshot

@@ -1,0 +1,3 @@
+name,label,value,url,as_of,decisive
+Example Widget,price,$19.99,https://example.com/widget,2026-01-01,1
+Example Widget,weight,250 grams,https://example.com/widget,2026-01-01,1

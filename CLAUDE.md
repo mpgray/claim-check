@@ -31,7 +31,17 @@ Paste an article URL; each factual claim gets a verdict with a receipt.
   history or certification table is the record itself). A refused receipt is kept on the
   claim and summarised in one plain sentence, never used.
 - Fixes stay generic: this checks ANY article, so no topic-specific data
-  (a game database, a curated per-topic domain list) is a source of truth.
+  (a game database, a curated per-topic domain list) is a source of truth
+  in this repo. A deployer's own data comes in only through a plug-in or a
+  request's `context` (`app/plugins.py`), never as code here. A plug-in's
+  records are judged like pages: the quote is held to the record's text by
+  `verify.check`. A `decisive` record is judged first and alone, and when it
+  settles a claim no web page overrules it; records are exempt from site
+  exclusions (they are the deployer's data, not pages found on the web).
+- A suggested correction exists only for a contradicted or outdated claim
+  with a receipt, and only if every figure, date and meaningful word it adds
+  is in that receipt (`verify.check_correction`). It is shown to a reader as
+  what the source says, never as an edit to apply.
 - Source tier comes from the host, never from the model.
 - Summary numbers are counts.
 - An inflation conversion is computed by code from BLS CPI data

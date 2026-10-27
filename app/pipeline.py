@@ -5,6 +5,10 @@ Every model output passes through code before it counts: spans through
 
 `Checker.run` reports progress through `on_event(kind, report, data)` so a
 background job can persist and stream the report as claims finish.
+
+A check can carry a request `context` (`clean_context`): tiers and sites to
+exclude for this one check. Plug-ins (`app.plugins`) add a deployer's own
+leads, records, tiers and exclusions.
 """
 import dataclasses
 import json
@@ -22,9 +26,10 @@ from app.config import Config
 from app.fetch import (MIN_PROSE_SHARE, FetchError, Page, article_passages, fetch_page,
                        focused_excerpt, prose_share)
 from app.llm import LLM, LLMError
-from app.prompts import (EXTRACT_SECOND_PASS, EXTRACT_SYSTEM, EXTRACT_USER, JUDGE_SYSTEM,
-                         JUDGE_USER)
-from app.search import TIER_RANK, Search, tier, unarchive
+from app.plugins import Document, Plugins
+from app.prompts import (CORRECT_SYSTEM, CORRECT_USER, EXTRACT_SECOND_PASS, EXTRACT_SYSTEM,
+                         EXTRACT_USER, JUDGE_SYSTEM, JUDGE_USER)
+from app.search import TIER_RANK, Search, domain_matches, tier, unarchive
 
 CHUNK_CHARS = 30_000       # default chunk size for chunk_passages
 SECTION_CHARS = 4_000      # one extraction call reads about this much: small enough to list everything
@@ -32,6 +37,8 @@ MAX_SECTIONS = 12          # per pass; longer articles get larger sections, not 
 HEADROOM = 1.5             # each section proposes its share of the claim limit, plus this margin
 MAX_EXTRACT_CALLS = 24     # extraction calls run all at once, up to this many
 MAX_ARTICLE_CHARS = 200_000  # beyond this the article is not read, and the report says so
+CONTEXT_LISTS = ('official_domains', 'reference_domains', 'exclude_domains')
+MAX_CONTEXT_DOMAINS = 500
 
 
 @dataclass
@@ -58,6 +65,10 @@ class Report:
     timings: dict = field(default_factory=dict)   # seconds per stage: fetch, extract, judge, snapshots, total
     subject_names: list[str] = field(default_factory=list)
     id: str = ''               # the stored report's id, when there is one
+    context: dict = field(default_factory=dict)   # this check's own tiers and exclusions (clean_context)
+    plugins: list[str] = field(default_factory=list)        # plug-ins that took part
+    plugin_errors: list[str] = field(default_factory=list)  # plug-in calls that failed, skipped
+    callback: dict = field(default_factory=dict)  # delivery of the finished report, when one was asked for
 
 
 def site(url: str) -> str:
@@ -68,6 +79,54 @@ def site(url: str) -> str:
         if host.startswith(prefix):
             host = host[len(prefix):]
     return host.replace('.m.', '.')
+
+
+def _host(url: str) -> str:
+    return (urlsplit(unarchive(url)).hostname or '').lower().strip('.')
+
+
+def clean_context(raw) -> dict:
+    """A request's context, keeping only what the pipeline reads: domain lists
+    (lower-cased, at most 500 each), the publisher's `site`, and an opaque
+    `plugin` dict passed through to plug-ins."""
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict = {}
+    for key in CONTEXT_LISTS:
+        items = raw.get(key) or []
+        if isinstance(items, str):
+            items = items.split(',')
+        domains = []
+        for d in items[:MAX_CONTEXT_DOMAINS]:
+            d = str(d).strip().lower().strip('.')
+            if '://' in d:
+                d = _host(d)
+            d = d.removeprefix('www.')
+            if d and d not in domains:
+                domains.append(d)
+        if domains:
+            out[key] = domains
+    own = str(raw.get('site') or '').strip()
+    host = site(own if '://' in own else f'https://{own}') if own else ''
+    if host:
+        out['site'] = host
+    if isinstance(raw.get('plugin'), dict):
+        out['plugin'] = raw['plugin']
+    return out
+
+
+def _merge_documents(docs: list[Document]) -> list[Document]:
+    """One document per address: a quote is held to the text at its URL, so
+    two records sharing one cannot be told apart."""
+    out: dict[str, Document] = {}
+    for d in docs:
+        if d.url in out:
+            kept = out[d.url]
+            out[d.url] = dataclasses.replace(
+                kept, text=f'{kept.text}\n{d.text}', decisive=kept.decisive and d.decisive,
+                tier=min(kept.tier, d.tier, key=TIER_RANK.__getitem__), date=max(kept.date, d.date))
+        else:
+            out[d.url] = d
+    return list(out.values())
 
 
 def _cited_links(hrefs: list[str], base: str) -> list[str]:
@@ -178,9 +237,12 @@ def merge_inflation(check: dict, verdict: str, reason: str, receipt: dict | None
 
 class Checker:
     def __init__(self, cfg: Config, llm: LLM, search: Search, fetch=fetch_page,
-                 snapshotter=None):
+                 snapshotter=None, plugins: Plugins | None = None):
         self.cfg, self.llm, self.search, self.fetch = cfg, llm, search, fetch
         self.snapshotter = snapshotter
+        self.plugins = plugins or Plugins()
+        self._use_context({})
+        self.draft_html = ''       # a draft's own HTML, for its snapshot
         self.cpi_loader = lambda: inflation.load_cpi(cfg.data_dir)
         self._page_cache: dict[str, Page | None] = {}
         self._cache_lock = threading.Lock()
@@ -209,13 +271,24 @@ class Checker:
         with self._cache_lock:
             return self._page_cache.get(url)
 
-    def run(self, url: str, on_event=None, report_id: str = '') -> Report:
+    def _use_context(self, context: dict) -> None:
+        self.context = context
+        self.official = self.cfg.official_domains + context.get('official_domains', [])
+        self.reference = self.cfg.reference_domains + context.get('reference_domains', [])
+        self.exclude = context.get('exclude_domains', [])
+
+    def run(self, url: str, on_event=None, report_id: str = '', context: dict | None = None,
+            page: Page | None = None) -> Report:
+        """Check the article at `url`, or `page` when given (a draft that has
+        no address yet: nothing is fetched)."""
         handler = on_event or _noop
 
         def emit(kind, report, data):
             with self.lock:
                 handler(kind, report, data)
-        report = Report(url=url, id=report_id)
+        context = clean_context(context)
+        self._use_context(context)
+        report = Report(url=url, id=report_id, context=context, plugins=list(self.plugins.names))
         started = mark = time.monotonic()
 
         def lap(stage: str) -> None:
@@ -226,7 +299,7 @@ class Checker:
             mark = now
 
         try:
-            page = self.fetch(url)
+            page = page or self.fetch(url)
         except FetchError as exc:
             report.error, report.status = str(exc), 'error'
             emit('error', report, {'error': report.error})
@@ -369,8 +442,20 @@ class Checker:
         return [u for u in ordered if not (u in seen or seen.add(u))]
 
     def _tier(self, url: str) -> str:
-        return tier(url, self.cfg.official_domains, self.cfg.reference_domains,
-                    self.cfg.default_tiers)
+        """The best tier any rule gives the host: settings, this check's
+        context, the built-in lists, plug-ins."""
+        found = tier(url, self.official, self.reference, self.cfg.default_tiers)
+        for t in self.plugins.tiers(url):
+            if TIER_RANK[t] < TIER_RANK[found]:
+                found = t
+        return found
+
+    def _own_sites(self, article_url: str) -> set[str]:
+        return {s for s in (site(article_url), self.context.get('site', '')) if s}
+
+    def _excluded(self, url: str) -> bool:
+        """A site this check must never use: listed in its context, or by a plug-in."""
+        return domain_matches(_host(url), self.exclude) or self.plugins.excluded(url)
 
     def _search(self, query: str) -> list[str]:
         """Search result URLs, sources of record first; [] on an outage (reported)."""
@@ -406,6 +491,9 @@ class Checker:
         # archived copy are alternates); search leads come next, so the
         # citation is checked rather than trusted.
         urls: list[str] = own_cites[:4]
+        # A plug-in's leads come next: the deployer's own idea of where this
+        # is written down, still fetched and held to the same filters.
+        urls += self.plugins.leads(claim, report)
         if claim.query:
             urls += self._search(self.anchored(claim.query, report, claims_mod.entities(claim.span)))
         # The article's own citations are leads too, but never the only lead
@@ -413,9 +501,8 @@ class Checker:
         urls += own_cites[4:] + cited
         return self._not_self(urls, claim, report.url)
 
-    @staticmethod
-    def _not_self(urls: list[str], claim: claims_mod.Claim, article_url: str) -> list[str]:
-        own = site(article_url)
+    def _not_self(self, urls: list[str], claim: claims_mod.Claim, article_url: str) -> list[str]:
+        own = self._own_sites(article_url)
         seen, out = set(), []
         for u in urls:
             if u in seen:
@@ -423,8 +510,11 @@ class Checker:
             seen.add(u)
             # The article cannot be its own receipt, nor can its publisher's
             # mirror of it: that is the claim quoting itself.
-            if site(u) == own:
+            if site(u) in own:
                 claim.dropped_self += 1
+                continue
+            if self._excluded(u):
+                claim.dropped_excluded += 1
                 continue
             out.append(u)
         return out
@@ -436,12 +526,16 @@ class Checker:
             verdict, reason, receipt = merge_inflation(check, verdict, reason, receipt)
         citations = audit_citations(self._own_citations(claim, report.cited_links),
                                     sources, receipt, verdict)
+        correction = refused = None
+        if verdict in ('contradicted', 'outdated') and receipt and receipt.get('kind') != 'computed':
+            correction, refused = self._correct(claim, verdict, receipt)
         with self.lock:
             claim.sources, claim.receipt = sources, receipt
             claim.verdict, claim.reason = verdict, reason
             claim.checks = [check] if check else []
             claim.citations = citations
             claim.rejected_receipt = rejected
+            claim.correction, claim.rejected_correction = correction, refused
 
     def _inflation(self, claim: claims_mod.Claim, report: Report) -> tuple[dict | None, str | None]:
         """(computed check, value to judge instead) for a claim with an
@@ -470,11 +564,22 @@ class Checker:
         writes nothing."""
         if claim.kind == 'opinion':
             return 'opinion', 'Judgement or advice; not checked.', None, [], None
-        pages: dict[str, str] = {}
-        dates: dict[str, str] = {}
-        sources = []
+        docs = _merge_documents(self.plugins.documents(claim, report))
+        first = None
+        decisive = [self._record_source(d, claim) for d in docs if d.decisive]
+        if decisive:
+            # A deployer's decisive records are judged first and alone. When
+            # they settle the claim the web is not asked to overrule them;
+            # when they are silent the claim is checked like any other.
+            first = self._verdict(claim, report, value, decisive)
+            if first[0] in verify.JUDGED:
+                return first
+        sources = [self._record_source(d, claim) for d in docs if not d.decisive]
+        sources = sources[:self.cfg.max_sources_per_claim]
         own = set(self._own_citations(claim, report.cited_links))
-        state = {'own_read': 0, 'keys': set(), 'tried': set()}
+        own_sites = self._own_sites(report.url)
+        state = {'own_read': 0, 'tried': set(),
+                 'keys': {unarchive(s['url']).split('://', 1)[-1].rstrip('/') for s in decisive + sources}}
         names = claims_mod.entities(claim.span)
         on_topic_names = report.subject_names + names if report.subject_names else []
 
@@ -487,7 +592,7 @@ class Checker:
                     continue    # tried already, the archived twin of a page read, or enough citations
                 state['tried'].add(url)
                 page = self._page(url)
-                if not page or site(page.url) == site(report.url):
+                if not page or site(page.url) in own_sites or self._excluded(page.url):
                     continue
                 # A page that names neither the article's subject nor anything
                 # specific the claim names is about something else (another
@@ -510,12 +615,10 @@ class Checker:
                     continue
                 state['keys'].add(key)
                 state['own_read'] += url in own
-                pages[page.url] = page.text
-                dates[page.url] = page.date
                 sources.append({'url': page.url, 'requested': url, 'title': page.title,
                                 'date': page.date, 'kind': page.kind,
                                 'text': focused_excerpt(page.source_passages, claim.span),
-                                'tier': self._tier(page.url)})
+                                'tier': self._tier(page.url), 'page': page.text})
 
         read(self._candidate_urls(claim, report.cited_links, report))
         if len(sources) < self.cfg.max_sources_per_claim and report.subject and claim.query \
@@ -524,9 +627,28 @@ class Checker:
             # with the most specific name as an exact phrase.
             phrase = max(names, key=len) if names else report.subject
             read(self._not_self(self._search(f'"{phrase}" {claim.query}'), claim, report.url))
-        listed = [{k: s[k] for k in ('url', 'requested', 'title', 'tier', 'date', 'kind')} for s in sources]
         if not sources:
-            return 'unverified', 'No readable source was found.', None, listed, None
+            if first:
+                return first
+            return 'unverified', 'No readable source was found.', None, [], None
+        verdict, reason, receipt, listed, rejected = self._verdict(claim, report, value, sources)
+        if first:
+            listed = first[3] + listed
+            rejected = rejected or first[4]
+        return verdict, reason, receipt, listed, rejected
+
+    @staticmethod
+    def _record_source(doc: Document, claim: claims_mod.Claim) -> dict:
+        lines = [line.strip() for line in doc.text.splitlines() if line.strip()]
+        return {'url': doc.url, 'requested': doc.url, 'title': doc.title, 'date': doc.date,
+                'kind': 'record', 'text': focused_excerpt(lines, claim.span),
+                'tier': doc.tier, 'page': '\n\n'.join(lines), 'decisive': doc.decisive}
+
+    def _verdict(self, claim: claims_mod.Claim, report: Report, value: str | None,
+                 sources: list[dict]):
+        """Judge one claim against `sources` and hold the answer to them."""
+        listed = [{k: s[k] for k in ('url', 'requested', 'title', 'tier', 'date', 'kind')}
+                  for s in sources]
         try:
             answer = self.llm.complete_json(
                 JUDGE_SYSTEM,
@@ -539,12 +661,16 @@ class Checker:
                                         for s in sources])))
         except LLMError as exc:
             return 'unverified', f'Judging failed: {exc}', None, listed, None
+        pages = {s['url']: s['page'] for s in sources}
+        dates = {s['url']: s['date'] for s in sources}
         judged = dataclasses.replace(claim, value=value) if value else claim
         verdict, receipt, reason = verify.check(
             judged, answer, pages, article_date=report.date, source_dates=dates)
         if receipt:
             src = next(s for s in sources if s['url'] == receipt['url'])
             receipt['tier'], receipt['date'], receipt['kind'] = src['tier'], src['date'], src['kind']
+            if src.get('decisive'):
+                receipt['decisive'] = True
         rejected = None
         claimed = str(answer.get('verdict') or '').lower()
         if verdict == 'unverified' and claimed in verify.JUDGED:
@@ -556,3 +682,21 @@ class Checker:
                         'quote': str(answer.get('quote') or '').strip()[:600], 'why': reason}
             reason = verify.plain_refusal(reason, claimed, cited)
         return verdict, reason, receipt, listed, rejected
+
+    def _correct(self, claim: claims_mod.Claim, verdict: str, receipt: dict) -> tuple[dict | None, dict | None]:
+        """(correction, refused) for a contradicted or outdated claim: the
+        sentence as its receipt would have it, kept only if every figure and
+        word it adds is in the receipt. For a reader of any page, not an edit."""
+        try:
+            answer = self.llm.complete_json(CORRECT_SYSTEM, CORRECT_USER.format(
+                verdict=verdict, span=claim.span, quote=receipt['quote'],
+                as_of=receipt.get('as_of') or 'not given'))
+        except LLMError as exc:
+            return None, {'text': '', 'why': f'Correction failed: {exc}'[:300]}
+        text = ' '.join(str(answer.get('text') or '').split())
+        if not text:
+            return None, None
+        why = verify.check_correction(claim.span, text, receipt['quote'], receipt.get('as_of', ''))
+        if why:
+            return None, {'text': text[:600], 'why': why}
+        return {'text': text, 'url': receipt['url']}, None

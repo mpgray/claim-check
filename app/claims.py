@@ -52,6 +52,9 @@ class Claim:
     dropped_offtopic: int = 0  # sources read that never mention the article's subject
     rejected_receipt: dict | None = None  # what the model cited when code refused it
     dropped_fragmentary: int = 0  # sources that were lists of fragments, not prose
+    dropped_excluded: int = 0  # results from sites the check was told never to use
+    correction: dict | None = None  # what the receipt says instead, held to it (app.verify.check_correction)
+    rejected_correction: dict | None = None  # a proposed correction code refused, and why
 
 
 def validate(article_text: str, raw: list[dict], limit: int) -> tuple[list[Claim], list[dict]]:
